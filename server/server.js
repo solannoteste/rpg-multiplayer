@@ -26,8 +26,9 @@ io.on('connection', (socket) => {
 });
 
 // Inicia o servidor na porta 3000
-server.listen(3000, () => {
-  console.log('🚀 Servidor rodando!');
-  console.log('📍 Abra http://localhost:3000 no seu navegador');
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log('🎮 Divirta-se!');
 });
