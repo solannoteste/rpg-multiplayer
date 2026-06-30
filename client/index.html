@@ -405,6 +405,8 @@ function handleData(data) {
   }
   
   if (data.type === 'playerJoin') {
+  // Host recebeu que cliente conectou
+  if (isHost) {
     otherPlayer = {
       id: data.id,
       name: data.name,
@@ -417,22 +419,43 @@ function handleData(data) {
       downed: false,
       attackAngle: 0,
       attacking: false,
-      reviveProgress: 0
+      reviveProgress: 0,
+      resistance: 0
     };
     addFloatingText(data.x, data.y - 0.8, `${data.name} entrou!`, '#4ecca3');
     updatePlayersOnline();
     
-    // Host manda dados do jogador dele de volta
-    if (isHost) {
-      sendData({
-        type: 'hostInfo',
-        id: myId,
-        name: playerName
-      });
-    }
+    // Host manda info de volta pro cliente
+    sendData({
+      type: 'hostInfo',
+      id: myId,
+      name: playerName,
+      x: player.x,
+      y: player.y
+    });
   }
+}
   
   if (data.type === 'hostInfo') {
+  // Cliente recebeu info do host - cria otherPlayer
+  otherPlayer = {
+    id: data.id,
+    name: data.name,
+    x: data.x || player.x,
+    y: data.y || player.y,
+    hp: 100,
+    maxHp: 100,
+    level: 1,
+    kills: 0,
+    downed: false,
+    attackAngle: 0,
+    attacking: false,
+    reviveProgress: 0,
+    resistance: 0
+  };
+  console.log('Conectado ao host:', data.name);
+  updatePlayersOnline();
+}
     // Cliente recebeu info do host
     console.log('Host:', data.name);
   }
@@ -486,12 +509,31 @@ function handleData(data) {
     });
   }
   
-  if (data.type === 'playerDamaged') {
-    if (data.playerId === myId) {
-      addFloatingText(player.x, player.y - 0.5, `-${Math.round(data.damage)}${data.isCrit ? ' CRIT!' : ''}`, data.isCrit ? '#ff4444' : '#ff8800');
-      screenShake.intensity = data.isCrit ? 8 : 4;
+if (data.type === 'playerDamaged') {
+  // Jogador recebeu dano
+  if (data.playerId === myId) {
+    // Aplica o dano
+    player.hp = Math.max(0, player.hp - data.damage);
+    player.lastHit = Date.now();
+    addFloatingText(player.x, player.y - 0.5, `-${Math.round(data.damage)}${data.isCrit ? ' CRIT!' : ''}`, data.isCrit ? '#ff4444' : '#ff8800');
+    screenShake.intensity = data.isCrit ? 8 : 4;
+    
+    // Verifica se morreu
+    if (player.hp <= 0 && !player.downed) {
+      player.hp = 0;
+      player.downed = true;
+      player.downedTime = Date.now();
+      document.getElementById('downedOverlay').style.display = 'flex';
+      addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+      
+      // Avisa o host
+      sendData({
+        type: 'playerDowned',
+        playerId: myId
+      });
     }
   }
+}
   
   if (data.type === 'playerDowned') {
     if (data.playerId === myId) {
