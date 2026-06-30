@@ -9,7 +9,8 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// ⬇️ MUDANÇA AQUI: apontar para ../client ao invés de public
+app.use(express.static(path.join(__dirname, '../client')));
 
 const players = {};
 
