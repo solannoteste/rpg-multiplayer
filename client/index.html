@@ -405,13 +405,41 @@ function handleData(data) {
   }
   
   if (data.type === 'playerJoin') {
-  // Host recebeu que cliente conectou
-  if (isHost) {
+    if (isHost) {
+      otherPlayer = {
+        id: data.id,
+        name: data.name,
+        x: data.x,
+        y: data.y,
+        hp: 100,
+        maxHp: 100,
+        level: 1,
+        kills: 0,
+        downed: false,
+        attackAngle: 0,
+        attacking: false,
+        reviveProgress: 0,
+        resistance: 0
+      };
+      addFloatingText(data.x, data.y - 0.8, `${data.name} entrou!`, '#4ecca3');
+      updatePlayersOnline();
+      
+      sendData({
+        type: 'hostInfo',
+        id: myId,
+        name: playerName,
+        x: player.x,
+        y: player.y
+      });
+    }
+  }
+  
+  if (data.type === 'hostInfo') {
     otherPlayer = {
       id: data.id,
       name: data.name,
-      x: data.x,
-      y: data.y,
+      x: data.x || player.x,
+      y: data.y || player.y,
       hp: 100,
       maxHp: 100,
       level: 1,
@@ -422,50 +450,35 @@ function handleData(data) {
       reviveProgress: 0,
       resistance: 0
     };
-    addFloatingText(data.x, data.y - 0.8, `${data.name} entrou!`, '#4ecca3');
+    console.log('Conectado ao host:', data.name);
     updatePlayersOnline();
-    
-    // Host manda info de volta pro cliente
-    sendData({
-      type: 'hostInfo',
-      id: myId,
-      name: playerName,
-      x: player.x,
-      y: player.y
-    });
-  }
-}
-  
-  if (data.type === 'hostInfo') {
-  // Cliente recebeu info do host - cria otherPlayer
-  otherPlayer = {
-    id: data.id,
-    name: data.name,
-    x: data.x || player.x,
-    y: data.y || player.y,
-    hp: 100,
-    maxHp: 100,
-    level: 1,
-    kills: 0,
-    downed: false,
-    attackAngle: 0,
-    attacking: false,
-    reviveProgress: 0,
-    resistance: 0
-  };
-  console.log('Conectado ao host:', data.name);
-  updatePlayersOnline();
-}
-    // Cliente recebeu info do host
-    console.log('Host:', data.name);
   }
   
   if (data.type === 'playerUpdate') {
-    if (otherPlayer) {
-      const wasDowned = otherPlayer.downed;
-      otherPlayer = { ...otherPlayer, ...data };
-      if (!wasDowned && data.downed) {
-        addFloatingText(data.x, data.y - 0.8, `${otherPlayer.name} foi abatido!`, '#e94560');
+    if (data.id !== myId) {
+      if (!otherPlayer) {
+        otherPlayer = {
+          id: data.id,
+          name: data.name || 'Jogador',
+          x: data.x,
+          y: data.y,
+          hp: data.hp || 100,
+          maxHp: data.maxHp || 100,
+          level: data.level || 1,
+          kills: data.kills || 0,
+          downed: data.downed || false,
+          attackAngle: data.attackAngle || 0,
+          attacking: data.attacking || false,
+          reviveProgress: 0,
+          resistance: data.resistance || 0
+        };
+        updatePlayersOnline();
+      } else {
+        const wasDowned = otherPlayer.downed;
+        otherPlayer = { ...otherPlayer, ...data };
+        if (!wasDowned && data.downed) {
+          addFloatingText(data.x, data.y - 0.8, `${otherPlayer.name} foi abatido!`, '#e94560');
+        }
       }
     }
   }
@@ -475,7 +488,6 @@ function handleData(data) {
   }
   
   if (data.type === 'playerAttack') {
-    // Cliente atacou - host processa o dano
     if (isHost) {
       processAttack(data);
     }
@@ -509,44 +521,38 @@ function handleData(data) {
     });
   }
   
-if (data.type === 'playerDamaged') {
-  // Jogador recebeu dano
-  if (data.playerId === myId) {
-    // Aplica o dano
-    player.hp = Math.max(0, player.hp - data.damage);
-    player.lastHit = Date.now();
-    addFloatingText(player.x, player.y - 0.5, `-${Math.round(data.damage)}${data.isCrit ? ' CRIT!' : ''}`, data.isCrit ? '#ff4444' : '#ff8800');
-    screenShake.intensity = data.isCrit ? 8 : 4;
-    
-    // Verifica se morreu
-    if (player.hp <= 0 && !player.downed) {
-      player.hp = 0;
-      player.downed = true;
-      player.downedTime = Date.now();
-      document.getElementById('downedOverlay').style.display = 'flex';
-      addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+  if (data.type === 'playerDamaged') {
+    if (data.playerId === myId) {
+      player.hp = Math.max(0, player.hp - data.damage);
+      player.lastHit = Date.now();
+      addFloatingText(player.x, player.y - 0.5, `-${Math.round(data.damage)}${data.isCrit ? ' CRIT!' : ''}`, data.isCrit ? '#ff4444' : '#ff8800');
+      screenShake.intensity = data.isCrit ? 8 : 4;
       
-      // Avisa o host
-      sendData({
-        type: 'playerDowned',
-        playerId: myId
-      });
+      if (player.hp <= 0 && !player.downed) {
+        player.hp = 0;
+        player.downed = true;
+        player.downedTime = Date.now();
+        document.getElementById('downedOverlay').style.display = 'flex';
+        addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+        
+        sendData({
+          type: 'playerDowned',
+          playerId: myId
+        });
+      }
     }
   }
-}
   
   if (data.type === 'playerDowned') {
-    if (data.playerId === myId) {
-      player.hp = 0;
-      player.downed = true;
-      player.downedTime = Date.now();
-      document.getElementById('downedOverlay').style.display = 'flex';
-      addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+    if (otherPlayer && data.playerId === otherPlayer.id) {
+      otherPlayer.downed = true;
+      otherPlayer.hp = 0;
+      addFloatingText(otherPlayer.x, otherPlayer.y - 1, `${otherPlayer.name} foi abatido!`, '#e94560');
     }
   }
   
   if (data.type === 'reviveProgress') {
-    if (otherPlayer && data.targetId === myId) {
+    if (otherPlayer && data.targetId === otherPlayer.id) {
       otherPlayer.reviveProgress = data.progress;
     }
   }
