@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>RPG de Blocos - Multiplayer</title>
+<title>RPG de Blocos - Multiplayer P2P</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; min-height: 100vh; overflow: hidden; }
@@ -12,6 +12,8 @@
   #menu button { padding: 15px 40px; font-size: 1.2em; border: none; border-radius: 8px; background: #4ecca3; color: #1a1a2e; cursor: pointer; margin: 8px; font-weight: bold; transition: transform 0.2s; }
   #menu button:hover { transform: scale(1.05); }
   #menu button.editor { background: #e94560; color: white; }
+  #menu button.join { background: #3498db; color: white; }
+  #roomIdDisplay { background: #0f3460; padding: 15px 25px; border-radius: 8px; font-size: 1.3em; color: #4ecca3; margin-bottom: 20px; border: 2px solid #4ecca3; font-weight: bold; letter-spacing: 2px; }
   #editor { position: fixed; inset: 0; display: none; flex-direction: column; background: #1a1a2e; }
   #editorHeader { padding: 15px; background: #0f3460; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
   #editorHeader h2 { color: #4ecca3; }
@@ -78,6 +80,7 @@
   #downedText { font-size: 4em; color: #e94560; font-weight: bold; text-shadow: 0 0 20px #000; animation: pulse 1s infinite; }
   #downedSubtext { font-size: 1.5em; color: #fff; margin-top: 20px; text-shadow: 0 0 10px #000; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  #connectionStatus { position: fixed; top: 15px; right: 80px; padding: 8px 15px; background: rgba(0,0,0,0.7); border-radius: 6px; font-size: 0.9em; }
 </style>
 </head>
 <body>
@@ -85,7 +88,8 @@
 <div id="menu">
   <h1>⚔️ RPG de Blocos</h1>
   <input type="text" id="playerName" placeholder="Seu nome" maxlength="15">
-  <button onclick="startGame()"> Jogar</button>
+  <button onclick="createRoom()">🏠 Criar Sala (Host)</button>
+  <button class="join" onclick="showJoinMenu()">🔗 Entrar em Sala</button>
   <button class="editor" onclick="openEditor()">🛠️ Editor</button>
 </div>
 
@@ -96,16 +100,10 @@
       <div class="tool active" data-tool="tree" onclick="selectTool('tree', this)">🌳 Árvore</div>
       <div class="tool" data-tool="skeleton" onclick="selectTool('skeleton', this)">💀 Esqueleto</div>
       <div class="tool" data-tool="goblin" onclick="selectTool('goblin', this)">👺 Goblin</div>
-      <div class="tool" data-tool="escuridao" onclick="selectTool('escuridao', this)"> Escuridão</div>
+      <div class="tool" data-tool="escuridao" onclick="selectTool('escuridao', this)">🌑 Escuridão</div>
       <div class="tool" data-tool="golem" onclick="selectTool('golem', this)">🗿 Golem</div>
       <div class="tool" data-tool="demon" onclick="selectTool('demon', this)">👹 Demônio</div>
       <div class="tool" data-tool="player_spawn" onclick="selectTool('player_spawn', this)">🧍 Spawn Player</div>
-      <div class="tool" data-tool="spawn_skeleton" onclick="selectTool('spawn_skeleton', this)"> Spawn Esq.</div>
-      <div class="tool" data-tool="spawn_goblin" onclick="selectTool('spawn_goblin', this)">🟩 Spawn Gob.</div>
-      <div class="tool" data-tool="spawn_escuridao" onclick="selectTool('spawn_escuridao', this)"> Spawn Escur.</div>
-      <div class="tool" data-tool="spawn_golem" onclick="selectTool('spawn_golem', this)"> Spawn Golem</div>
-      <div class="tool" data-tool="spawn_demon" onclick="selectTool('spawn_demon', this)">👹 Spawn Demônio</div>
-      <div class="tool" data-tool="spawn_goblin_king" onclick="selectTool('spawn_goblin_king', this)">👑 Spawn Rei</div>
       <div class="tool" data-tool="paint" onclick="selectTool('paint', this)">🎨 Tinta</div>
       <input type="color" id="colorPicker" value="#8B4513" title="Cor da tinta">
       <div class="tool" data-tool="eraser" onclick="selectTool('eraser', this)">🧹 Borracha</div>
@@ -122,7 +120,7 @@
 <div id="game">
   <canvas id="gameCanvas"></canvas>
   <div id="hud">
-    <div><strong id="hudName">Jogador</strong></div>
+    <div><strong id="hudName">Jogador</strong> <span id="hostBadge" style="color:#FFD700;font-size:0.8em;display:none;">[HOST]</span></div>
     <div>Vida: <span id="hudHp">100</span>/100</div>
     <div class="bar"><div class="bar-fill hp-fill" id="hpBar" style="width:100%"></div></div>
     <div>Level: <span id="hudLevel">1</span> | XP: <span id="hudXp">0</span>/<span id="hudXpNeed">100</span></div>
@@ -133,6 +131,7 @@
     <div style="font-size:0.8em;opacity:0.7" id="hudShield">🛡️ Sem escudo equipado</div>
     <div style="margin-top:8px;font-size:0.85em;color:#4ecca3" id="hudPlayersOnline">👥 Online: 1</div>
   </div>
+  <div id="connectionStatus">🔴 Desconectado</div>
   <div id="controls-hint">WASD: Mover | Mouse: Mirar | Click: Atacar | F: Pegar | E: Inventário | Tab: Ranking | ESPAÇO: Reviver aliado | ESC: Sair</div>
   <button id="exitBtn" onclick="exitGame()">✖ Sair</button>
 </div>
@@ -170,7 +169,7 @@
   </div>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
 const TILE = 32;
 const MAP_W = 25;
@@ -182,10 +181,14 @@ let currentTool = 'tree';
 let inventoryOpen = false;
 let rankingOpen = false;
 
-let socket = null;
-let myPlayerId = null;
-let otherPlayers = {};
+// ============ PEERJS ============
+let peer = null;
+let conn = null;
+let isHost = false;
+let myId = '';
+let otherPlayer = null;
 let lastPlayerUpdate = 0;
+let lastEnemiesUpdate = 0;
 let isReviving = false;
 let reviveTarget = null;
 let reviveStartTime = 0;
@@ -212,10 +215,6 @@ if (savedMap) {
       mapObjects = data.objects;
       groundPaint = data.groundPaint || groundPaint;
       playerSpawnPos = data.playerSpawn || { x: 12, y: 12 };
-    } else if (Array.isArray(data) && data.length === MAP_H) {
-      for (let y = 0; y < MAP_H; y++)
-        for (let x = 0; x < MAP_W; x++)
-          mapObjects[y][x] = data[y][x];
     }
   } catch(e) { console.warn('Erro ao carregar mapa:', e); }
 }
@@ -238,9 +237,6 @@ let player = {
 
 let enemies = [];
 let dyingEnemies = [], groundItems = [], floatingTexts = [], particles = [];
-let thrownGoblins = [];
-let jumpShadows = [];
-let lightBeams = [];
 let keys = {};
 let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
 let screenShake = { x: 0, y: 0, intensity: 0 };
@@ -266,73 +262,210 @@ const golemImg = new Image(); golemImg.src = 'golem.png'; golemImg.onload = () =
 const demonImg = new Image(); demonImg.src = 'demon.png'; demonImg.onload = () => demonImage = demonImg;
 const arcanjoImg = new Image(); arcanjoImg.src = 'arcanjo.png'; arcanjoImg.onload = () => arcanjoImage = arcanjoImg;
 
-function initSocket() {
-  if (socket) return;
+// ============ PEERJS FUNCTIONS ============
+function updateConnectionStatus(status, color) {
+  const el = document.getElementById('connectionStatus');
+  el.textContent = status;
+  el.style.color = color;
+}
+
+function createRoom() {
+  const name = document.getElementById('playerName').value.trim();
+  playerName = name || 'Jogador';
+  isHost = true;
   
-  socket = io();
+  updateConnectionStatus('🟡 Criando sala...', '#ff9800');
   
-  socket.on('connect', () => {
-    console.log('Conectado ao servidor');
+  peer = new Peer();
+  
+  peer.on('open', (id) => {
+    myId = id;
+    updateConnectionStatus('🟢 Sala criada!', '#4ecca3');
+    alert(`Sala criada!\n\nSeu ID: ${id}\n\nMande esse ID pro seu amigo!\nEle vai clicar em "Entrar em Sala" e colar.`);
+    
+    document.getElementById('menu').innerHTML = `
+      <h1>⚔️ RPG de Blocos</h1>
+      <div style="font-size:1.2em;margin-bottom:10px;">Sala criada! Aguardando jogador...</div>
+      <div id="roomIdDisplay">${id}</div>
+      <button onclick="startGame()">▶️ Começar sozinho</button>
+      <button onclick="copyId()">📋 Copiar ID</button>
+    `;
   });
   
-  socket.on('init', (data) => {
-    myPlayerId = data.playerId;
-    otherPlayers = data.players || {};
-    delete otherPlayers[myPlayerId];
-    socket.emit('setName', playerName);
+  peer.on('connection', (connection) => {
+    conn = connection;
+    setupConnection();
+  });
+  
+  peer.on('error', (err) => {
+    console.error('Erro:', err);
+    alert('Erro ao criar sala: ' + err.message);
+    updateConnectionStatus('🔴 Erro', '#e94560');
+  });
+}
+
+function copyId() {
+  navigator.clipboard.writeText(myId);
+  alert('ID copiado!');
+}
+
+function showJoinMenu() {
+  document.getElementById('menu').innerHTML = `
+    <h1>⚔️ RPG de Blocos</h1>
+    <input type="text" id="playerNameJoin" placeholder="Seu nome" maxlength="15">
+    <input type="text" id="roomId" placeholder="Cole o ID da sala aqui">
+    <button onclick="joinRoom()">🔗 Conectar</button>
+    <button onclick="location.reload()">↩️ Voltar</button>
+  `;
+}
+
+function joinRoom() {
+  const name = document.getElementById('playerNameJoin').value.trim();
+  const roomId = document.getElementById('roomId').value.trim();
+  playerName = name || 'Jogador';
+  isHost = false;
+  
+  if (!roomId) {
+    alert('Digite o ID da sala!');
+    return;
+  }
+  
+  updateConnectionStatus('🟡 Conectando...', '#ff9800');
+  
+  peer = new Peer();
+  
+  peer.on('open', (id) => {
+    myId = id;
+    conn = peer.connect(roomId);
+    setupConnection();
+  });
+  
+  peer.on('error', (err) => {
+    console.error('Erro:', err);
+    alert('Erro ao conectar: ' + err.message);
+    updateConnectionStatus('🔴 Erro', '#e94560');
+  });
+}
+
+function setupConnection() {
+  conn.on('open', () => {
+    console.log('Conectado!');
+    updateConnectionStatus('🟢 Conectado', '#4ecca3');
+    
+    if (isHost) {
+      // Host manda o mapa pro cliente
+      conn.send({
+        type: 'mapData',
+        objects: mapObjects,
+        groundPaint: groundPaint,
+        playerSpawn: playerSpawnPos
+      });
+    } else {
+      // Cliente manda o nome
+      conn.send({
+        type: 'playerJoin',
+        id: myId,
+        name: playerName,
+        x: player.x,
+        y: player.y
+      });
+    }
+    
+    setTimeout(() => startGame(), 500);
+  });
+  
+  conn.on('data', (data) => {
+    handleData(data);
+  });
+  
+  conn.on('close', () => {
+    console.log('Desconectado');
+    updateConnectionStatus('🔴 Desconectado', '#e94560');
+    otherPlayer = null;
     updatePlayersOnline();
   });
-  
-  socket.on('playerJoined', (p) => {
-    if (p.id !== myPlayerId) {
-      otherPlayers[p.id] = p;
-      addFloatingText(p.x, p.y - 0.8, `${p.name} entrou!`, '#4ecca3');
-      updatePlayersOnline();
+}
+
+function sendData(data) {
+  if (conn && conn.open) {
+    try {
+      conn.send(data);
+    } catch(e) {
+      console.error('Erro ao enviar:', e);
     }
-  });
+  }
+}
+
+function handleData(data) {
+  if (data.type === 'mapData') {
+    mapObjects = data.objects;
+    groundPaint = data.groundPaint;
+    playerSpawnPos = data.playerSpawn;
+    console.log('Mapa recebido do host');
+  }
   
-  socket.on('playerUpdated', (p) => {
-    if (p.id !== myPlayerId) {
-      const wasDowned = otherPlayers[p.id] && otherPlayers[p.id].downed;
-      otherPlayers[p.id] = p;
-      if (!wasDowned && p.downed) {
-        addFloatingText(p.x, p.y - 0.8, `${p.name} foi abatido!`, '#e94560');
+  if (data.type === 'playerJoin') {
+    otherPlayer = {
+      id: data.id,
+      name: data.name,
+      x: data.x,
+      y: data.y,
+      hp: 100,
+      maxHp: 100,
+      level: 1,
+      kills: 0,
+      downed: false,
+      attackAngle: 0,
+      attacking: false,
+      reviveProgress: 0
+    };
+    addFloatingText(data.x, data.y - 0.8, `${data.name} entrou!`, '#4ecca3');
+    updatePlayersOnline();
+    
+    // Host manda dados do jogador dele de volta
+    if (isHost) {
+      sendData({
+        type: 'hostInfo',
+        id: myId,
+        name: playerName
+      });
+    }
+  }
+  
+  if (data.type === 'hostInfo') {
+    // Cliente recebeu info do host
+    console.log('Host:', data.name);
+  }
+  
+  if (data.type === 'playerUpdate') {
+    if (otherPlayer) {
+      const wasDowned = otherPlayer.downed;
+      otherPlayer = { ...otherPlayer, ...data };
+      if (!wasDowned && data.downed) {
+        addFloatingText(data.x, data.y - 0.8, `${otherPlayer.name} foi abatido!`, '#e94560');
       }
     }
-  });
+  }
   
-  socket.on('playerLeft', (playerId) => {
-    if (otherPlayers[playerId]) {
-      addFloatingText(otherPlayers[playerId].x, otherPlayers[playerId].y - 0.8, `${otherPlayers[playerId].name} saiu!`, '#e94560');
-      delete otherPlayers[playerId];
-      updatePlayersOnline();
+  if (data.type === 'enemiesUpdate') {
+    enemies = data.enemies;
+  }
+  
+  if (data.type === 'playerAttack') {
+    // Cliente atacou - host processa o dano
+    if (isHost) {
+      processAttack(data);
     }
-  });
-
-  socket.on('enemiesUpdate', (serverEnemies) => {
-    console.log(`Recebendo ${serverEnemies.length} inimigos`);
-    enemies = serverEnemies;
-  });
-
-  socket.on('enemyDamaged', (data) => {
+  }
+  
+  if (data.type === 'enemyDamaged') {
     addFloatingText(data.x, data.y - 0.5, `-${data.damage}${data.isCrit ? ' CRIT!' : ''}`, data.isCrit ? '#ff4444' : '#ffff00');
-    let particleColor = '#4a7c3f';
-    const enemy = enemies.find(e => e.id === data.enemyId);
-    if (enemy) {
-      if (enemy.type === 'skeleton') particleColor = '#e8e8e8';
-      else if (enemy.type === 'skeleton_shield') particleColor = '#b0b0b0';
-      else if (enemy.type === 'goblin_king') particleColor = '#FFD700';
-      else if (enemy.type === 'escuridao') particleColor = '#1a1a2e';
-      else if (enemy.type === 'golem') particleColor = '#8b7355';
-      else if (enemy.type === 'demon') particleColor = '#8b0000';
-      else if (enemy.type === 'arcanjo') particleColor = '#FFD700';
-      spawnParticles(data.x, data.y, particleColor, enemy.isKing ? 15 : 8);
-      screenShake.intensity = data.isCrit ? 10 : (enemy.isKing ? 7 : 5);
-    }
-  });
-
-  socket.on('enemyKilled', (data) => {
-    if (data.killerId === myPlayerId) {
+    spawnParticles(data.x, data.y, '#ffff00', 8);
+    screenShake.intensity = data.isCrit ? 10 : 5;
+  }
+  
+  if (data.type === 'enemyKilled') {
+    if (data.killerId === myId) {
       player.xp += data.xp;
       player.kills++;
       updateHUDKills();
@@ -341,83 +474,63 @@ function initSocket() {
       addFloatingText(data.x, data.y - 0.5, `+${data.xp} XP`, '#4ecca3');
     }
     
-    const knockbackAngle = Math.atan2(data.y - player.y, data.x - player.x);
     dyingEnemies.push({ 
-      type: data.type, 
+      type: data.type2, 
       x: data.x, 
       y: data.y, 
-      vx: Math.cos(knockbackAngle) * 4, 
+      vx: 0, 
       vy: -6, 
       time: 0, 
       maxTime: 2.0, 
-      isKing: data.isKing, 
-      isArcanjo: data.isArcanjo 
+      isKing: data.isKing
     });
-    
-    if (data.isKing) {
-      addFloatingText(data.x, data.y - 1.5, '👑 REI DERROTADO!', '#FFD700');
-      spawnParticles(data.x, data.y, '#FFD700', 40);
-      screenShake.intensity = 20;
+  }
+  
+  if (data.type === 'playerDamaged') {
+    if (data.playerId === myId) {
+      addFloatingText(player.x, player.y - 0.5, `-${Math.round(data.damage)}${data.isCrit ? ' CRIT!' : ''}`, data.isCrit ? '#ff4444' : '#ff8800');
+      screenShake.intensity = data.isCrit ? 8 : 4;
     }
-  });
-
-  socket.on('playerDamaged', (data) => {
-    if (data.playerId === myPlayerId) {
-      const shield = player.equipment.shield;
-      let dmg = data.damage;
-      
-      if (shield && shield.blockChance && Math.random() < shield.blockChance) {
-        addFloatingText(player.x, player.y - 0.8, '🛡️ BLOCK!', '#3498db');
-        spawnParticles(player.x, player.y, '#3498db', 12);
-        screenShake.intensity = 3;
-      } else {
-        addFloatingText(player.x, player.y - 0.5, `-${Math.round(dmg)}${data.isCrit ? ' CRIT!' : ''}`, data.isCrit ? '#ff4444' : '#ff8800');
-        screenShake.intensity = data.isCrit ? 8 : 4;
-      }
+  }
+  
+  if (data.type === 'playerDowned') {
+    if (data.playerId === myId) {
+      player.hp = 0;
+      player.downed = true;
+      player.downedTime = Date.now();
+      document.getElementById('downedOverlay').style.display = 'flex';
+      addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
     }
-  });
-
-  socket.on('hordeSpawned', (data) => {
-    addFloatingText(data.x, data.y - 1.0, `⚠️ HORDE! +${data.count} ${data.name}`, '#ff4444');
-  });
-
-  socket.on('goblinKingSpawned', (data) => {
-    addFloatingText(data.x, data.y - 1.5, '👑 GOBLIN REI!', '#FFD700');
-    spawnParticles(data.x, data.y, '#FFD700', 20);
-    screenShake.intensity = 8;
-  });
-
-  socket.on('kingJumpCharge', (data) => {
-    jumpShadows.push({
-      x: data.targetX,
-      y: data.targetY,
-      life: 2.0,
-      pulse: 0,
-      radius: 1.2
-    });
-    addFloatingText(data.x, data.y - 1.5, '⚠️ PULO!', '#ff4444');
-  });
-
-  socket.on('kingJumped', (data) => {
-    screenShake.intensity = 15;
-    spawnParticles(data.x, data.y, '#8B4513', 30);
-    spawnParticles(data.x, data.y, '#654321', 20);
-    addFloatingText(data.x, data.y - 1, '💥 BOOM!', '#8B4513');
-  });
+  }
+  
+  if (data.type === 'reviveProgress') {
+    if (otherPlayer && data.targetId === myId) {
+      otherPlayer.reviveProgress = data.progress;
+    }
+  }
+  
+  if (data.type === 'playerRevived') {
+    if (data.targetId === myId) {
+      player.downed = false;
+      player.hp = 50;
+      document.getElementById('downedOverlay').style.display = 'none';
+      addFloatingText(player.x, player.y - 1, '✨ REVIVIDO!', '#4ecca3');
+    }
+  }
 }
 
+// ============ GAME FUNCTIONS ============
 function updatePlayersOnline() {
-  const count = Object.keys(otherPlayers).length + 1;
+  const count = otherPlayer ? 2 : 1;
   const el = document.getElementById('hudPlayersOnline');
   if (el) el.textContent = `👥 Online: ${count}`;
 }
 
 function startGame() {
-  const name = document.getElementById('playerName').value.trim();
-  playerName = name || 'Jogador';
   document.getElementById('hudName').textContent = playerName;
-
-  initSocket();
+  if (isHost) {
+    document.getElementById('hostBadge').style.display = 'inline';
+  }
 
   player.x = playerSpawnPos.x + 0.5;
   player.y = playerSpawnPos.y + 0.5;
@@ -430,8 +543,12 @@ function startGame() {
   player.inventory = [];
   player.downed = false; player.downedTime = 0;
   floatingTexts = []; dyingEnemies = []; groundItems = []; particles = [];
-  thrownGoblins = []; jumpShadows = []; lightBeams = [];
   isReviving = false; reviveTarget = null;
+
+  // Host carrega os inimigos
+  if (isHost) {
+    loadInitialEnemies();
+  }
 
   document.getElementById('menu').style.display = 'none';
   document.getElementById('game').style.display = 'block';
@@ -444,13 +561,274 @@ function startGame() {
   gameLoop();
 }
 
+// ============ INIMIGOS (só roda no HOST) ============
+function createEnemy(type, x, y, hp, atk, xpReward) {
+  return {
+    id: Date.now() + Math.random(),
+    type, x, y,
+    spawnX: x, spawnY: y,
+    hp, maxHp: hp, atk, xpReward,
+    lastAttack: 0,
+    bouncePhase: 0, isMoving: false,
+    facingRight: Math.random() < 0.5,
+    state: 'idle', idleTimer: 0,
+    stunTimer: 0,
+    isKing: false,
+    isArcanjo: false
+  };
+}
+
+function createSkeletonOrShield(x, y) {
+  if (Math.random() < 0.20) {
+    return createEnemy('skeleton_shield', x, y, 200, 20, 50);
+  } else {
+    return createEnemy('skeleton', x, y, 80, 20, 25);
+  }
+}
+
+function createDemonOrArcanjo(x, y) {
+  if (Math.random() < 0.01) {
+    const e = createEnemy('arcanjo', x, y, 500, 80, 150);
+    e.isArcanjo = true;
+    return e;
+  } else {
+    return createEnemy('demon', x, y, 200, 50, 60);
+  }
+}
+
+function loadInitialEnemies() {
+  enemies = [];
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < MAP_W; x++) {
+      const cell = mapObjects[y][x];
+      if (cell === 'skeleton') enemies.push(createSkeletonOrShield(x + 0.5, y + 0.5));
+      else if (cell === 'goblin') enemies.push(createEnemy('goblin', x + 0.5, y + 0.5, 90, 15, 20));
+      else if (cell === 'escuridao') enemies.push(createEnemy('escuridao', x + 0.5, y + 0.5, 200, 60, 40));
+      else if (cell === 'golem') enemies.push(createEnemy('golem', x + 0.5, y + 0.5, 250, 40, 35));
+      else if (cell === 'demon') enemies.push(createDemonOrArcanjo(x + 0.5, y + 0.5));
+    }
+  }
+}
+
+function isBlocked(x, y) {
+  const offsets = [[-0.4,-0.4],[0.4,-0.4],[-0.4,0.4],[0.4,0.4]];
+  for (const [ox, oy] of offsets) {
+    const bx = Math.floor(x + ox); const by = Math.floor(y + oy);
+    if (bx < 0 || bx >= MAP_W || by < 0 || by >= MAP_H) return true;
+    if (mapObjects[by][bx] === 'tree') return true;
+  }
+  return false;
+}
+
+function isEnemyBlocked(x, y, self) {
+  for (const e of enemies) {
+    if (e === self) continue;
+    if (Math.hypot(e.x - x, e.y - y) < 0.8) return true;
+  }
+  return false;
+}
+
+// IA dos inimigos - roda SÓ no host
+function updateEnemiesAI(dt) {
+  if (!isHost) return;
+  
+  const now = Date.now();
+  
+  // Todos os jogadores ativos (host + otherPlayer)
+  const allPlayers = [player];
+  if (otherPlayer && !otherPlayer.downed) allPlayers.push(otherPlayer);
+  
+  enemies.forEach(e => {
+    if (e.stunTimer > 0) {
+      e.stunTimer -= dt;
+      e.isMoving = false;
+      return;
+    }
+
+    // Achar jogador mais próximo
+    let closestPlayer = null;
+    let closestDist = Infinity;
+    
+    allPlayers.forEach(p => {
+      const dist = Math.hypot(p.x - e.x, p.y - e.y);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestPlayer = p;
+      }
+    });
+
+    if (!closestPlayer) return;
+
+    e.isMoving = false;
+
+    if (e.state === 'chasing') {
+      if (closestDist > 12) {
+        e.state = 'returning';
+      } else {
+        const angle = Math.atan2(closestPlayer.y - e.y, closestPlayer.x - e.x);
+        let espeed = 1.5 * dt;
+        if (e.type === 'escuridao') espeed = 2.2 * dt;
+        
+        const ex = e.x + Math.cos(angle) * espeed;
+        const ey = e.y + Math.sin(angle) * espeed;
+        let moved = false;
+        if (!isBlocked(ex, e.y) && !isEnemyBlocked(ex, e.y, e)) { e.x = ex; moved = true; }
+        if (!isBlocked(e.x, ey) && !isEnemyBlocked(e.x, ey, e)) { e.y = ey; moved = true; }
+        if (!moved) {
+          const perpAngle = angle + Math.PI / 2;
+          const sideX = e.x + Math.cos(perpAngle) * espeed * 2;
+          const sideY = e.y + Math.sin(perpAngle) * espeed * 2;
+          if (!isBlocked(sideX, e.y) && !isEnemyBlocked(sideX, e.y, e)) e.x = sideX;
+          else if (!isBlocked(e.x, sideY) && !isEnemyBlocked(e.x, sideY, e)) e.y = sideY;
+        }
+        e.isMoving = true;
+        if (Math.cos(angle) < -0.1) e.facingRight = false;
+        else if (Math.cos(angle) > 0.1) e.facingRight = true;
+      }
+    } else if (e.state === 'returning') {
+      const distToSpawn = Math.hypot(e.spawnX - e.x, e.spawnY - e.y);
+      if (distToSpawn < 1.5) {
+        e.state = 'idle';
+        e.idleTimer = 2 + Math.random() * 3;
+      } else {
+        const angle = Math.atan2(e.spawnY - e.y, e.spawnX - e.x);
+        let espeed = 2.0 * dt;
+        if (e.type === 'escuridao') espeed = 2.5 * dt;
+        
+        const ex = e.x + Math.cos(angle) * espeed;
+        const ey = e.y + Math.sin(angle) * espeed;
+        if (!isBlocked(ex, e.y) && !isEnemyBlocked(ex, e.y, e)) e.x = ex;
+        if (!isBlocked(e.x, ey) && !isEnemyBlocked(e.x, ey, e)) e.y = ey;
+        e.isMoving = true;
+        if (Math.cos(angle) < -0.1) e.facingRight = false;
+        else if (Math.cos(angle) > 0.1) e.facingRight = true;
+      }
+    } else if (e.state === 'idle') {
+      e.idleTimer -= dt;
+      if (e.idleTimer <= 0) {
+        const action = Math.random();
+        if (action < 0.4) {
+          const angle = Math.random() * Math.PI * 2;
+          for (let i = 0; i < 2; i++) {
+            const ex = e.x + Math.cos(angle) * 0.3;
+            const ey = e.y + Math.sin(angle) * 0.3;
+            if (!isBlocked(ex, ey) && !isEnemyBlocked(ex, ey, e)) { e.x = ex; e.y = ey; }
+          }
+          e.isMoving = true;
+          if (Math.cos(angle) < -0.1) e.facingRight = false;
+          else if (Math.cos(angle) > 0.1) e.facingRight = true;
+          e.idleTimer = 3 + Math.random() * 4;
+        } else {
+          e.idleTimer = 2 + Math.random() * 3;
+        }
+      }
+    }
+
+    if (closestDist < 8 && e.state !== 'chasing') e.state = 'chasing';
+
+    if (e.isMoving) e.bouncePhase += dt * 8;
+    else { e.bouncePhase *= 0.9; if (Math.abs(e.bouncePhase) < 0.01) e.bouncePhase = 0; }
+
+    // Ataque
+    if (closestDist < 1.2 && now - e.lastAttack > 1000 && e.stunTimer <= 0) {
+      const isCrit = Math.random() < 0.05;
+      let dmg = isCrit ? e.atk * 2 : e.atk;
+
+      if (closestPlayer.hp > 0 && !closestPlayer.downed) {
+        dmg = dmg * (1 - (closestPlayer.resistance || 0));
+        closestPlayer.hp -= dmg;
+        closestPlayer.lastHit = now;
+        
+        // Avisar o jogador que levou dano
+        sendData({
+          type: 'playerDamaged',
+          playerId: closestPlayer === player ? myId : otherPlayer.id,
+          damage: dmg,
+          isCrit: isCrit
+        });
+        
+        // Se for o host mesmo, aplicar visualmente
+        if (closestPlayer === player) {
+          addFloatingText(player.x, player.y - 0.5, `-${Math.round(dmg)}${isCrit ? ' CRIT!' : ''}`, isCrit ? '#ff4444' : '#ff8800');
+          screenShake.intensity = isCrit ? 8 : 4;
+        }
+
+        if (closestPlayer.hp <= 0 && !closestPlayer.downed) {
+          closestPlayer.hp = 0;
+          closestPlayer.downed = true;
+          closestPlayer.downedTime = Date.now();
+          
+          sendData({
+            type: 'playerDowned',
+            playerId: closestPlayer === player ? myId : otherPlayer.id
+          });
+          
+          if (closestPlayer === player) {
+            document.getElementById('downedOverlay').style.display = 'flex';
+            addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+          }
+        }
+      }
+
+      e.lastAttack = now;
+    }
+  });
+}
+
+function processAttack(attackData) {
+  // Host processa o ataque do cliente
+  const attacker = otherPlayer;
+  if (!attacker) return;
+  
+  enemies.forEach((e, index) => {
+    const dist = Math.hypot(attackData.x - e.x, attackData.y - e.y);
+    const hitRange = 2.0;
+    
+    if (dist < hitRange) {
+      const angleToEnemy = Math.atan2(e.y - attackData.y, e.x - attackData.x);
+      let angleDiff = angleToEnemy - attackData.angle;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      
+      if (Math.abs(angleDiff) <= Math.PI / 4) {
+        const isCrit = Math.random() < 0.05;
+        const dmg = isCrit ? attackData.damage * 2 : attackData.damage;
+        
+        e.hp -= dmg;
+        
+        sendData({
+          type: 'enemyDamaged',
+          damage: dmg,
+          isCrit: isCrit,
+          x: e.x,
+          y: e.y
+        });
+
+        if (e.hp <= 0) {
+          sendData({
+            type: 'enemyKilled',
+            type2: e.type,
+            x: e.x,
+            y: e.y,
+            xp: e.xpReward,
+            isKing: e.isKing,
+            killerId: attackData.attackerId
+          });
+          
+          if (attacker) attacker.kills++;
+          
+          enemies.splice(index, 1);
+        }
+      }
+    }
+  });
+}
+
 function openEditor() { document.getElementById('menu').style.display = 'none'; document.getElementById('editor').style.display = 'flex'; state = 'editor'; initEditorCanvas(); }
 function closeEditor() { document.getElementById('editor').style.display = 'none'; document.getElementById('menu').style.display = 'flex'; state = 'menu'; }
 function exitGame() { 
   document.getElementById('game').style.display = 'none'; 
-  document.getElementById('menu').style.display = 'flex'; 
-  document.getElementById('downedOverlay').style.display = 'none';
-  state = 'menu'; 
+  location.reload();
 }
 
 function toggleInventory() {
@@ -472,12 +850,9 @@ function updateRankingUI() {
   let rankData = [];
   try { rankData = JSON.parse(localStorage.getItem('rpgRanking') || '[]'); } catch(e) { rankData = []; }
   
-  Object.values(otherPlayers).forEach(p => {
-    const existing = rankData.find(r => r.name === p.name);
-    if (!existing) {
-      rankData.push({ name: p.name, kills: p.kills || 0 });
-    }
-  });
+  if (otherPlayer) {
+    rankData.push({ name: otherPlayer.name, kills: otherPlayer.kills || 0, online: true });
+  }
   
   if (rankData.length === 0) {
     list.innerHTML = '<div class="rank-empty">Nenhum jogador no ranking ainda</div>';
@@ -491,10 +866,7 @@ function updateRankingUI() {
     const posDiv = document.createElement('div'); posDiv.className = 'rank-pos'; posDiv.textContent = `${index + 1}º`;
     const nameDiv = document.createElement('div'); nameDiv.className = 'rank-name'; nameDiv.textContent = entry.name;
     if (entry.name === playerName) { nameDiv.style.color = '#4ecca3'; nameDiv.textContent += ' (você)'; }
-    else {
-      const isOnline = Object.values(otherPlayers).some(p => p.name === entry.name);
-      if (isOnline) nameDiv.style.color = '#9b59b6';
-    }
+    else if (entry.online) nameDiv.style.color = '#9b59b6';
     const killsDiv = document.createElement('div'); killsDiv.className = 'rank-kills'; killsDiv.textContent = `${entry.kills} kills`;
     div.appendChild(posDiv); div.appendChild(nameDiv); div.appendChild(killsDiv);
     list.appendChild(div);
@@ -509,13 +881,6 @@ function saveRanking() {
   else rankData.push({ name: playerName, kills: player.kills });
   rankData.sort((a, b) => b.kills - a.kills);
   localStorage.setItem('rpgRanking', JSON.stringify(rankData.slice(0, 20)));
-}
-
-function removeFromRanking() {
-  let rankData = [];
-  try { rankData = JSON.parse(localStorage.getItem('rpgRanking') || '[]'); } catch(e) { return; }
-  rankData = rankData.filter(r => r.name !== playerName);
-  localStorage.setItem('rpgRanking', JSON.stringify(rankData));
 }
 
 function drawInventoryPlayer() {
@@ -851,44 +1216,6 @@ function drawArcanjo(ctx, x, y, facingRight = true) {
   ctx.restore();
 }
 
-function drawGoblinKing(ctx, x, y, facingRight = true, scale = 1.3) {
-  ctx.save();
-  const w = TILE * scale;
-  const h = TILE * scale;
-  const ox = x - (w - TILE) / 2;
-  const oy = y - (h - TILE);
-  
-  if (!facingRight) { ctx.translate(ox + w, oy); ctx.scale(-1, 1); }
-  else { ctx.translate(ox, oy); }
-  
-  if (goblinKingImage) {
-    ctx.drawImage(goblinKingImage, 0, 0, w, h);
-  } else {
-    ctx.fillStyle = '#2d5016';
-    ctx.fillRect(8, 16, 32, 24);
-    ctx.fillStyle = '#4a7c3f';
-    ctx.fillRect(12, 8, 24, 16);
-    ctx.fillStyle = '#ff0000';
-    ctx.fillRect(16, 14, 4, 4);
-    ctx.fillRect(28, 14, 4, 4);
-    ctx.fillStyle = '#FFD700';
-    ctx.fillRect(12, 2, 24, 6);
-    ctx.fillRect(14, 0, 4, 4);
-    ctx.fillRect(22, 0, 4, 4);
-    ctx.fillRect(30, 0, 4, 4);
-    ctx.fillStyle = '#2d5016';
-    ctx.fillRect(2, 20, 8, 16);
-    ctx.fillRect(38, 20, 8, 16);
-    ctx.fillRect(12, 38, 8, 10);
-    ctx.fillRect(28, 38, 8, 10);
-    ctx.fillStyle = '#8b4513';
-    ctx.fillRect(42, 14, 4, 20);
-    ctx.fillStyle = '#555';
-    ctx.fillRect(40, 10, 8, 8);
-  }
-  ctx.restore();
-}
-
 function drawPlayer(ctx, x, y) {
   ctx.fillStyle = '#3498db'; ctx.fillRect(x + 8, y + 6, 16, 12);
   ctx.fillRect(x + 10, y + 18, 12, 12); ctx.fillRect(x + 6, y + 20, 4, 8); ctx.fillRect(x + 22, y + 20, 4, 8);
@@ -976,6 +1303,10 @@ function update(dt) {
   const now = Date.now();
   if (player.hp < player.maxHp && now - player.lastHit > 10000) player.hp = Math.min(player.maxHp, player.hp + 10 * dt);
 
+  // IA dos inimigos (só no host)
+  updateEnemiesAI(dt);
+
+  // Reviver
   if (keys[' '] && !player.downed) {
     const nearbyDownedPlayer = findNearbyDownedPlayer();
     if (nearbyDownedPlayer) {
@@ -989,17 +1320,28 @@ function update(dt) {
       const elapsed = Date.now() - reviveStartTime;
       const progress = Math.min(elapsed / REVIVE_TIME, 1);
       
-      socket.emit('reviveProgress', {
+      sendData({
+        type: 'reviveProgress',
         targetId: nearbyDownedPlayer.id,
         progress: progress
       });
       
       if (progress >= 1) {
-        socket.emit('playerRevived');
-        nearbyDownedPlayer.downed = false;
-        nearbyDownedPlayer.hp = 50;
-        nearbyDownedPlayer.reviveProgress = 0;
-        nearbyDownedPlayer.beingRevivedBy = null;
+        sendData({
+          type: 'playerRevived',
+          targetId: nearbyDownedPlayer.id
+        });
+        
+        if (isHost && otherPlayer && nearbyDownedPlayer.id === otherPlayer.id) {
+          otherPlayer.downed = false;
+          otherPlayer.hp = 50;
+          otherPlayer.reviveProgress = 0;
+        } else if (!isHost && nearbyDownedPlayer.id === myId) {
+          player.downed = false;
+          player.hp = 50;
+          document.getElementById('downedOverlay').style.display = 'none';
+        }
+        
         isReviving = false;
         reviveTarget = null;
         addFloatingText(nearbyDownedPlayer.x, nearbyDownedPlayer.y - 1, '✨ REVIVIDO!', '#4ecca3');
@@ -1038,11 +1380,13 @@ function update(dt) {
   mouse.worldX = (mouse.x + camera.x) / TILE; mouse.worldY = (mouse.y + camera.y) / TILE;
   updateHUD();
   
+  // Enviar updates
   const nowUpdate = Date.now();
-  if (nowUpdate - lastPlayerUpdate > 50 && socket) {
+  if (nowUpdate - lastPlayerUpdate > 50) {
     lastPlayerUpdate = nowUpdate;
-    socket.emit('playerUpdate', {
-      id: myPlayerId,
+    sendData({
+      type: 'playerUpdate',
+      id: myId,
       name: playerName,
       x: player.x,
       y: player.y,
@@ -1052,29 +1396,26 @@ function update(dt) {
       kills: player.kills,
       attackAngle: player.attackAngle,
       attacking: player.attacking,
-      downed: player.downed
+      downed: player.downed,
+      resistance: player.resistance
+    });
+  }
+  
+  // Host envia inimigos pro cliente
+  if (isHost && nowUpdate - lastEnemiesUpdate > 100) {
+    lastEnemiesUpdate = nowUpdate;
+    sendData({
+      type: 'enemiesUpdate',
+      enemies: enemies
     });
   }
 }
 
 function findNearbyDownedPlayer() {
-  for (const id in otherPlayers) {
-    const p = otherPlayers[id];
-    if (p.downed && Math.hypot(player.x - p.x, player.y - p.y) < 2) {
-      return p;
-    }
+  if (otherPlayer && otherPlayer.downed && Math.hypot(player.x - otherPlayer.x, player.y - otherPlayer.y) < 2) {
+    return otherPlayer;
   }
   return null;
-}
-
-function isBlocked(x, y) {
-  const offsets = [[-0.4,-0.4],[0.4,-0.4],[-0.4,0.4],[0.4,0.4]];
-  for (const [ox, oy] of offsets) {
-    const bx = Math.floor(x + ox); const by = Math.floor(y + oy);
-    if (bx < 0 || bx >= MAP_W || by < 0 || by >= MAP_H) return true;
-    if (mapObjects[by][bx] === 'tree') return true;
-  }
-  return false;
 }
 
 function doAttack() {
@@ -1088,15 +1429,79 @@ function doAttack() {
   const angleToMouse = Math.atan2(mouse.worldY - player.y, mouse.worldX - player.x);
   player.attackAngle = angleToMouse;
 
-  socket.emit('playerAttack', {
-    x: player.x,
-    y: player.y,
-    angle: angleToMouse,
-    damage: player.damage,
-    range: 2.0
-  });
+  if (isHost) {
+    // Host processa o ataque localmente
+    processHostAttack(angleToMouse);
+  } else {
+    // Cliente manda pro host processar
+    sendData({
+      type: 'playerAttack',
+      x: player.x,
+      y: player.y,
+      angle: angleToMouse,
+      damage: player.damage,
+      attackerId: myId
+    });
+  }
 
   setTimeout(() => player.attacking = false, 200);
+}
+
+function processHostAttack(angleToMouse) {
+  enemies.forEach((e, index) => {
+    const hitRange = 2.0;
+    const dist = Math.hypot(player.x - e.x, player.y - e.y);
+    
+    if (dist < hitRange) {
+      const angleToEnemy = Math.atan2(e.y - player.y, e.x - player.x);
+      let angleDiff = angleToEnemy - angleToMouse;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      
+      if (Math.abs(angleDiff) <= Math.PI / 4) {
+        const isCrit = Math.random() < 0.05;
+        const dmg = isCrit ? player.damage * 2 : player.damage;
+        
+        e.hp -= dmg;
+        addFloatingText(e.x, e.y - 0.5, `-${dmg}${isCrit ? ' CRIT!' : ''}`, isCrit ? '#ff4444' : '#ffff00');
+        spawnParticles(e.x, e.y, '#ffff00', 8);
+        screenShake.intensity = isCrit ? 10 : 5;
+
+        if (e.hp <= 0) {
+          dyingEnemies.push({ 
+            type: e.type, 
+            x: e.x, 
+            y: e.y, 
+            vx: 0, 
+            vy: -6, 
+            time: 0, 
+            maxTime: 2.0, 
+            isKing: e.isKing
+          });
+          
+          player.xp += e.xpReward;
+          player.kills++;
+          updateHUDKills();
+          saveRanking();
+          checkLevelUp();
+          addFloatingText(e.x, e.y - 0.5, `+${e.xpReward} XP`, '#4ecca3');
+          
+          // Avisar cliente
+          sendData({
+            type: 'enemyKilled',
+            type2: e.type,
+            x: e.x,
+            y: e.y,
+            xp: e.xpReward,
+            isKing: e.isKing,
+            killerId: myId
+          });
+          
+          enemies.splice(index, 1);
+        }
+      }
+    }
+  });
 }
 
 function pickupNearbyItem() {
@@ -1149,32 +1554,13 @@ function render() {
     gameCtx.fillStyle = 'rgba(0,0,0,0.4)'; gameCtx.beginPath(); gameCtx.ellipse(px, itemY + 14, 10, 3, 0, 0, Math.PI * 2); gameCtx.fill();
     if (item.item.img && itemImages[item.item.name]) gameCtx.drawImage(itemImages[item.item.name], px - 14, itemY - 14, 28, 28);
     else { gameCtx.fillStyle = '#ff9800'; gameCtx.fillRect(px - 10, itemY - 10, 20, 20); }
-    const timeLeft = 15 - item.time;
-    if (timeLeft < 5) gameCtx.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.5;
-    gameCtx.fillStyle = '#fff'; gameCtx.font = 'bold 10px Arial'; gameCtx.textAlign = 'center'; gameCtx.strokeStyle = '#000'; gameCtx.lineWidth = 2;
-    gameCtx.strokeText(item.item.name, px, itemY - 20); gameCtx.fillText(item.item.name, px, itemY - 20);
     gameCtx.globalAlpha = 1;
   });
 
   dyingEnemies.forEach(de => {
     const px = (de.x - 0.5) * TILE; const py = (de.y - 0.5) * TILE;
     const alpha = 1 - (de.time / de.maxTime); gameCtx.globalAlpha = alpha;
-    if (de.type === 'skeleton' || de.type === 'skeleton_shield') {
-      const v = 232 * (1 - de.time/de.maxTime);
-      gameCtx.fillStyle = `rgb(${Math.floor(232 + 23 * (de.time/de.maxTime))}, ${Math.floor(v)}, ${Math.floor(v)})`;
-    } else if (de.type === 'goblin_king') {
-      gameCtx.fillStyle = `rgb(${Math.floor(255 * (1 - de.time/de.maxTime))}, ${Math.floor(215 * (1 - de.time/de.maxTime))}, 0)`;
-    } else if (de.type === 'arcanjo') {
-      gameCtx.fillStyle = `rgb(${Math.floor(255 * (1 - de.time/de.maxTime))}, ${Math.floor(215 * (1 - de.time/de.maxTime))}, ${Math.floor(100 * (1 - de.time/de.maxTime))})`;
-    } else if (de.type === 'escuridao') {
-      gameCtx.fillStyle = `rgb(${Math.floor(26 * (1 - de.time/de.maxTime))}, ${Math.floor(26 * (1 - de.time/de.maxTime))}, ${Math.floor(46 * (1 - de.time/de.maxTime))})`;
-    } else if (de.type === 'golem') {
-      gameCtx.fillStyle = `rgb(${Math.floor(139 * (1 - de.time/de.maxTime))}, ${Math.floor(115 * (1 - de.time/de.maxTime))}, ${Math.floor(85 * (1 - de.time/de.maxTime))})`;
-    } else if (de.type === 'demon') {
-      gameCtx.fillStyle = `rgb(${Math.floor(139 * (1 - de.time/de.maxTime))}, ${Math.floor(0 * (1 - de.time/de.maxTime))}, ${Math.floor(0 * (1 - de.time/de.maxTime))})`;
-    } else {
-      gameCtx.fillStyle = `rgb(${74 + 181 * (de.time/de.maxTime)}, ${Math.floor(124 * (1 - de.time/de.maxTime))}, ${Math.floor(63 * (1 - de.time/de.maxTime))})`;
-    }
+    gameCtx.fillStyle = '#ff4444';
     gameCtx.fillRect(px + 8, py + 6, 16, 10); gameCtx.fillRect(px + 10, py + 16, 12, 12);
     gameCtx.globalAlpha = 1;
   });
@@ -1183,12 +1569,6 @@ function render() {
     const px = (e.x - 0.5) * TILE; const py = (e.y - 0.5) * TILE;
     const bounceOffset = Math.sin(e.bouncePhase) * 0.1 * TILE;
 
-    let jumpOffset = 0;
-    if (e.isKing && e.state === 'jumping') {
-      const t = e.jumpProgress;
-      jumpOffset = -Math.sin(t * Math.PI) * 100;
-    }
-
     if (e.type === 'skeleton') drawSkeleton(gameCtx, px, py - bounceOffset, e.facingRight);
     else if (e.type === 'skeleton_shield') drawSkeletonShield(gameCtx, px, py - bounceOffset, e.facingRight);
     else if (e.type === 'goblin') drawGoblin(gameCtx, px, py - bounceOffset, e.facingRight);
@@ -1196,128 +1576,42 @@ function render() {
     else if (e.type === 'golem') drawGolem(gameCtx, px, py - bounceOffset, e.facingRight);
     else if (e.type === 'demon') drawDemon(gameCtx, px, py - bounceOffset, e.facingRight);
     else if (e.type === 'arcanjo') drawArcanjo(gameCtx, px, py - bounceOffset, e.facingRight);
-    else if (e.type === 'goblin_king') {
-      if (e.state === 'jumping') {
-        gameCtx.globalAlpha = 0.3;
-        gameCtx.fillStyle = '#000';
-        gameCtx.beginPath();
-        gameCtx.ellipse(px + TILE/2, py + TILE - 4, 24, 6, 0, 0, Math.PI * 2);
-        gameCtx.fill();
-        gameCtx.globalAlpha = 1;
-      }
-      drawGoblinKing(gameCtx, px, py - bounceOffset + jumpOffset, e.facingRight);
-      
-      if (e.state === 'jumpCharge') {
-        gameCtx.globalAlpha = 0.3 + Math.sin(Date.now() / 100) * 0.2;
-        gameCtx.fillStyle = '#ff0000';
-        gameCtx.beginPath();
-        gameCtx.arc(px + TILE/2, py + TILE/2, 40, 0, Math.PI * 2);
-        gameCtx.fill();
-        gameCtx.globalAlpha = 1;
-      }
-    }
 
-    const barWidth = e.isKing ? 60 : 28;
-    const barY = e.isKing ? py - 50 - bounceOffset + jumpOffset : py - 8 - bounceOffset;
+    const barWidth = 28;
+    const barY = py - 8 - bounceOffset;
     drawHealthBar(gameCtx, px + (TILE - barWidth) / 2, barY, barWidth, e.hp, e.maxHp);
-    
-    if (e.isKing) {
-      gameCtx.fillStyle = '#FFD700';
-      gameCtx.font = 'bold 12px Arial';
-      gameCtx.textAlign = 'center';
-      gameCtx.strokeStyle = '#000';
-      gameCtx.lineWidth = 3;
-      gameCtx.strokeText('👑 GOBLIN REI', px + TILE/2, barY - 6);
-      gameCtx.fillText('👑 GOBLIN REI', px + TILE/2, barY - 6);
-    } else if (e.isArcanjo) {
-      gameCtx.fillStyle = '#FFD700';
-      gameCtx.font = 'bold 10px Arial';
-      gameCtx.textAlign = 'center';
-      gameCtx.strokeStyle = '#000';
-      gameCtx.lineWidth = 2;
-      gameCtx.strokeText('✨ ARCANJO', px + TILE/2, barY - 6);
-      gameCtx.fillText('✨ ARCANJO', px + TILE/2, barY - 6);
-    }
-
-    if (e.stunTimer > 0) {
-      const stunAlpha = Math.min(1, e.stunTimer);
-      gameCtx.globalAlpha = stunAlpha;
-      gameCtx.fillStyle = '#ffff00';
-      gameCtx.font = 'bold 14px Arial';
-      gameCtx.textAlign = 'center';
-      const stunY = e.isKing ? py - 60 - bounceOffset + jumpOffset : py - 14 - bounceOffset;
-      gameCtx.fillText('💫', px + TILE / 2, stunY);
-      gameCtx.globalAlpha = 1;
-    }
-    
-    if (e.isArcanjo) {
-      if (Math.random() < 0.3) {
-        const sparkX = px + Math.random() * TILE;
-        const sparkY = py + Math.random() * TILE;
-        gameCtx.globalAlpha = 0.6;
-        gameCtx.fillStyle = '#FFD700';
-        gameCtx.fillRect(sparkX, sparkY, 2, 2);
-        gameCtx.globalAlpha = 1;
-      }
-    }
   });
 
-  Object.values(otherPlayers).forEach(p => {
-    const px = (p.x - 0.5) * TILE;
-    const py = (p.y - 0.5) * TILE;
+  // Outro jogador
+  if (otherPlayer) {
+    const px = (otherPlayer.x - 0.5) * TILE;
+    const py = (otherPlayer.y - 0.5) * TILE;
     
-    if (p.downed) {
+    if (otherPlayer.downed) {
       drawDownedPlayer(gameCtx, px, py, true);
     } else {
       drawOtherPlayer(gameCtx, px, py);
     }
     
-    drawHealthBar(gameCtx, px + 2, py - 8, 28, p.hp, p.maxHp);
+    drawHealthBar(gameCtx, px + 2, py - 8, 28, otherPlayer.hp, otherPlayer.maxHp);
     
     gameCtx.fillStyle = '#fff';
     gameCtx.font = 'bold 12px Arial';
     gameCtx.textAlign = 'center';
     gameCtx.strokeStyle = '#000';
     gameCtx.lineWidth = 3;
-    gameCtx.strokeText(p.name, px + 16, py - 15);
-    gameCtx.fillText(p.name, px + 16, py - 15);
+    gameCtx.strokeText(otherPlayer.name, px + 16, py - 15);
+    gameCtx.fillText(otherPlayer.name, px + 16, py - 15);
     
-    gameCtx.fillStyle = '#4ecca3';
-    gameCtx.font = 'bold 10px Arial';
-    gameCtx.strokeText(`Lv${p.level}`, px + 16, py - 25);
-    gameCtx.fillText(`Lv${p.level}`, px + 16, py - 25);
-    
-    if (p.downed) {
+    if (otherPlayer.downed) {
       gameCtx.fillStyle = '#e94560';
       gameCtx.font = 'bold 12px Arial';
       gameCtx.strokeText('💀 ABATIDO', px + 16, py - 35);
       gameCtx.fillText('💀 ABATIDO', px + 16, py - 35);
     }
-    
-    if (p.reviveProgress > 0 && p.reviveProgress < 1) {
-      const barWidth = 40;
-      const barHeight = 6;
-      const barX = px + 16 - barWidth / 2;
-      const barY = py - 45;
-      
-      gameCtx.fillStyle = '#333';
-      gameCtx.fillRect(barX, barY, barWidth, barHeight);
-      gameCtx.fillStyle = '#4ecca3';
-      gameCtx.fillRect(barX, barY, barWidth * p.reviveProgress, barHeight);
-      gameCtx.strokeStyle = '#000';
-      gameCtx.lineWidth = 1;
-      gameCtx.strokeRect(barX, barY, barWidth, barHeight);
-      
-      gameCtx.fillStyle = '#fff';
-      gameCtx.font = 'bold 10px Arial';
-      gameCtx.textAlign = 'center';
-      gameCtx.strokeStyle = '#000';
-      gameCtx.lineWidth = 2;
-      gameCtx.strokeText('Revivendo...', px + 16, barY - 3);
-      gameCtx.fillText('Revivendo...', px + 16, barY - 3);
-    }
-  });
+  }
 
+  // Player local
   const ppx = (player.x - 0.5) * TILE; 
   const ppy = (player.y - 0.5) * TILE;
   
@@ -1333,44 +1627,15 @@ function render() {
     const progress = 1 - (player.attackAnimTime / 0.3);
     const arcRadius = 40 + progress * 20; const arcWidth = 8;
     gameCtx.save(); gameCtx.translate(ppx + 16, ppy + 16); gameCtx.rotate(player.attackAngle);
-    const isCritArc = player.lastAttackCrit === true;
-    const isAngelical = player.equipment.weapon.name === 'Espada Angelical';
-    gameCtx.strokeStyle = isCritArc ? '#ff4444' : (isAngelical ? '#FFD700' : '#ffffff');
+    gameCtx.strokeStyle = '#ffffff';
     gameCtx.lineWidth = arcWidth * (1 - progress * 0.5); gameCtx.lineCap = 'round';
     gameCtx.beginPath(); gameCtx.arc(0, 0, arcRadius, -Math.PI / 4, Math.PI / 4); gameCtx.stroke();
-    gameCtx.strokeStyle = isCritArc ? 'rgba(255,68,68,0.3)' : (isAngelical ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.3)');
-    gameCtx.lineWidth = arcWidth * 2; gameCtx.beginPath(); gameCtx.arc(0, 0, arcRadius, -Math.PI / 4, Math.PI / 4); gameCtx.stroke();
     gameCtx.restore();
   }
 
   particles.forEach(p => { gameCtx.globalAlpha = Math.max(0, p.life * 2); gameCtx.fillStyle = p.color; gameCtx.fillRect(p.x * TILE - p.size/2, p.y * TILE - p.size/2, p.size, p.size); });
   gameCtx.globalAlpha = 1;
   floatingTexts.forEach(ft => { gameCtx.globalAlpha = Math.max(0, ft.life); gameCtx.fillStyle = ft.color; gameCtx.font = 'bold 16px Arial'; gameCtx.textAlign = 'center'; gameCtx.strokeStyle = '#000'; gameCtx.lineWidth = 3; gameCtx.strokeText(ft.text, ft.x * TILE, ft.y * TILE); gameCtx.fillText(ft.text, ft.x * TILE, ft.y * TILE); gameCtx.globalAlpha = 1; });
-
-  let nearbyItem = null;
-  for (const item of groundItems) { if (Math.hypot(player.x - item.x, player.y - item.y) < 1.5) { nearbyItem = item; break; } }
-  if (nearbyItem && !player.downed) {
-    const ix = nearbyItem.x * TILE; const iy = nearbyItem.y * TILE;
-    gameCtx.fillStyle = '#fff'; gameCtx.font = 'bold 14px Arial'; gameCtx.textAlign = 'center'; gameCtx.strokeStyle = '#000'; gameCtx.lineWidth = 3;
-    gameCtx.strokeText(`[F] ${nearbyItem.item.name}`, ix, iy - 30); gameCtx.fillText(`[F] ${nearbyItem.item.name}`, ix, iy - 30);
-  }
-
-  if (!player.downed) {
-    const downedNearby = findNearbyDownedPlayer();
-    if (downedNearby) {
-      const ix = downedNearby.x * TILE;
-      const iy = downedNearby.y * TILE;
-      gameCtx.fillStyle = '#4ecca3';
-      gameCtx.font = 'bold 14px Arial';
-      gameCtx.textAlign = 'center';
-      gameCtx.strokeStyle = '#000';
-      gameCtx.lineWidth = 3;
-      const progress = isReviving && reviveTarget === downedNearby.id ? Math.floor(((Date.now() - reviveStartTime) / REVIVE_TIME) * 100) : 0;
-      const text = isReviving && reviveTarget === downedNearby.id ? `[ESPAÇO] Revivendo ${progress}%` : '[ESPAÇO] Reviver aliado';
-      gameCtx.strokeText(text, ix, iy - 50);
-      gameCtx.fillText(text, ix, iy - 50);
-    }
-  }
 
   gameCtx.restore();
 }
