@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>RPG de Blocos</title>
+<title>RPG de Blocos - Multiplayer</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; min-height: 100vh; overflow: hidden; }
@@ -74,6 +74,10 @@
   .backpack-list::-webkit-scrollbar { width: 8px; }
   .backpack-list::-webkit-scrollbar-track { background: #0f3460; border-radius: 4px; }
   .backpack-list::-webkit-scrollbar-thumb { background: #4ecca3; border-radius: 4px; }
+  #downedOverlay { position: fixed; inset: 0; display: none; background: rgba(139,0,0,0.4); z-index: 40; align-items: center; justify-content: center; flex-direction: column; pointer-events: none; }
+  #downedText { font-size: 4em; color: #e94560; font-weight: bold; text-shadow: 0 0 20px #000; animation: pulse 1s infinite; }
+  #downedSubtext { font-size: 1.5em; color: #fff; margin-top: 20px; text-shadow: 0 0 10px #000; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 </style>
 </head>
 <body>
@@ -127,9 +131,15 @@
     <div style="margin-top:5px;font-size:0.85em;opacity:0.8" id="hudWeapon">⚔️ Espada Velha (30 dmg) | 5% Crítico</div>
     <div style="font-size:0.8em;opacity:0.7" id="hudArmor">🛡️ Resistência: 0%</div>
     <div style="font-size:0.8em;opacity:0.7" id="hudShield">🛡️ Sem escudo equipado</div>
+    <div style="margin-top:8px;font-size:0.85em;color:#4ecca3" id="hudPlayersOnline">👥 Online: 1</div>
   </div>
-  <div id="controls-hint">WASD: Mover | Mouse: Mirar | Click: Atacar | F: Pegar | E: Inventário | Tab: Ranking | ESC: Sair</div>
+  <div id="controls-hint">WASD: Mover | Mouse: Mirar | Click: Atacar | F: Pegar | E: Inventário | Tab: Ranking | ESPAÇO: Reviver aliado | ESC: Sair</div>
   <button id="exitBtn" onclick="exitGame()">✖ Sair</button>
+</div>
+
+<div id="downedOverlay">
+  <div id="downedText">💀 ABATIDO</div>
+  <div id="downedSubtext">Aguarde um aliado te reviver (segure ESPAÇO perto de você)</div>
 </div>
 
 <div id="inventory">
@@ -160,6 +170,7 @@
   </div>
 </div>
 
+<script src="/socket.io/socket.io.js"></script>
 <script>
 const TILE = 32;
 const MAP_W = 25;
@@ -170,6 +181,16 @@ let playerName = 'Jogador';
 let currentTool = 'tree';
 let inventoryOpen = false;
 let rankingOpen = false;
+
+// ============ MULTIPLAYER ============
+let socket = null;
+let myPlayerId = null;
+let otherPlayers = {};
+let lastPlayerUpdate = 0;
+let isReviving = false;
+let reviveTarget = null;
+let reviveStartTime = 0;
+const REVIVE_TIME = 5000; // 5 segundos
 
 let mapObjects = [];
 let groundPaint = [];
@@ -216,7 +237,8 @@ let player = {
   x: 12, y: 12, hp: 100, maxHp: 100, xp: 0, level: 1, xpNeed: 100,
   damage: 30, attackSpeed: 0.5, resistance: 0, kills: 0,
   lastHit: 0, attacking: false, attackCooldown: 0, attackAngle: 0, attackAnimTime: 0, lastAttackCrit: false,
-  equipment: { weapon: null, helmet: null, armor: null, shield: null }, inventory: []
+  equipment: { weapon: null, helmet: null, armor: null, shield: null }, inventory: [],
+  downed: false, downedTime: 0
 };
 
 let enemies = [], dyingEnemies = [], groundItems = [], floatingTexts = [], particles = [];
@@ -250,10 +272,63 @@ const golemImg = new Image(); golemImg.src = 'golem.png'; golemImg.onload = () =
 const demonImg = new Image(); demonImg.src = 'demon.png'; demonImg.onload = () => demonImage = demonImg;
 const arcanjoImg = new Image(); arcanjoImg.src = 'arcanjo.png'; arcanjoImg.onload = () => arcanjoImage = arcanjoImg;
 
+// ============ SOCKET.IO SETUP ============
+function initSocket() {
+  if (socket) return;
+  
+  socket = io();
+  
+  socket.on('connect', () => {
+    console.log('Conectado ao servidor');
+  });
+  
+  socket.on('init', (data) => {
+    myPlayerId = data.playerId;
+    otherPlayers = data.players || {};
+    delete otherPlayers[myPlayerId];
+    socket.emit('setName', playerName);
+    updatePlayersOnline();
+  });
+  
+  socket.on('playerJoined', (p) => {
+    if (p.id !== myPlayerId) {
+      otherPlayers[p.id] = p;
+      addFloatingText(p.x, p.y - 0.8, `${p.name} entrou!`, '#4ecca3');
+      updatePlayersOnline();
+    }
+  });
+  
+  socket.on('playerUpdated', (p) => {
+    if (p.id !== myPlayerId) {
+      const wasDowned = otherPlayers[p.id] && otherPlayers[p.id].downed;
+      otherPlayers[p.id] = p;
+      if (!wasDowned && p.downed) {
+        addFloatingText(p.x, p.y - 0.8, `${p.name} foi abatido!`, '#e94560');
+      }
+    }
+  });
+  
+  socket.on('playerLeft', (playerId) => {
+    if (otherPlayers[playerId]) {
+      addFloatingText(otherPlayers[playerId].x, otherPlayers[playerId].y - 0.8, `${otherPlayers[playerId].name} saiu!`, '#e94560');
+      delete otherPlayers[playerId];
+      updatePlayersOnline();
+    }
+  });
+}
+
+function updatePlayersOnline() {
+  const count = Object.keys(otherPlayers).length + 1;
+  const el = document.getElementById('hudPlayersOnline');
+  if (el) el.textContent = `👥 Online: ${count}`;
+}
+
 function startGame() {
   const name = document.getElementById('playerName').value.trim();
   playerName = name || 'Jogador';
   document.getElementById('hudName').textContent = playerName;
+
+  initSocket();
 
   player.x = playerSpawnPos.x + 0.5;
   player.y = playerSpawnPos.y + 0.5;
@@ -264,9 +339,11 @@ function startGame() {
   player.attackCooldown = 0;
   player.equipment = { weapon: { ...ITEM_DB['Espada Velha'] }, helmet: null, armor: null, shield: null };
   player.inventory = [];
+  player.downed = false; player.downedTime = 0;
   floatingTexts = []; dyingEnemies = []; groundItems = []; particles = [];
   thrownGoblins = []; jumpShadows = []; lightBeams = [];
   hordeInstances = []; goblinKingInstances = [];
+  isReviving = false; reviveTarget = null;
 
   loadInitialEnemies();
   initHordes();
@@ -274,6 +351,7 @@ function startGame() {
 
   document.getElementById('menu').style.display = 'none';
   document.getElementById('game').style.display = 'block';
+  document.getElementById('downedOverlay').style.display = 'none';
   state = 'game';
 
   initGameCanvas();
@@ -446,7 +524,12 @@ function findFreeSpawnPosition(centerX, centerY, radius, excludePositions = []) 
 
 function openEditor() { document.getElementById('menu').style.display = 'none'; document.getElementById('editor').style.display = 'flex'; state = 'editor'; initEditorCanvas(); }
 function closeEditor() { document.getElementById('editor').style.display = 'none'; document.getElementById('menu').style.display = 'flex'; state = 'menu'; }
-function exitGame() { document.getElementById('game').style.display = 'none'; document.getElementById('menu').style.display = 'flex'; state = 'menu'; }
+function exitGame() { 
+  document.getElementById('game').style.display = 'none'; 
+  document.getElementById('menu').style.display = 'flex'; 
+  document.getElementById('downedOverlay').style.display = 'none';
+  state = 'menu'; 
+}
 
 function toggleInventory() {
   inventoryOpen = !inventoryOpen;
@@ -463,18 +546,36 @@ function toggleRanking() {
 function updateRankingUI() {
   const list = document.getElementById('rankList');
   list.innerHTML = '';
+  
+  // Combinar ranking local com jogadores online
   let rankData = [];
   try { rankData = JSON.parse(localStorage.getItem('rpgRanking') || '[]'); } catch(e) { rankData = []; }
+  
+  // Adicionar jogadores online ao ranking
+  Object.values(otherPlayers).forEach(p => {
+    const existing = rankData.find(r => r.name === p.name);
+    if (!existing) {
+      rankData.push({ name: p.name, kills: p.kills || 0 });
+    }
+  });
+  
   if (rankData.length === 0) {
     list.innerHTML = '<div class="rank-empty">Nenhum jogador no ranking ainda</div>';
     return;
   }
-  rankData.forEach((entry, index) => {
+  
+  rankData.sort((a, b) => b.kills - a.kills);
+  rankData.slice(0, 20).forEach((entry, index) => {
     const div = document.createElement('div');
     div.className = 'rank-entry';
     const posDiv = document.createElement('div'); posDiv.className = 'rank-pos'; posDiv.textContent = `${index + 1}º`;
     const nameDiv = document.createElement('div'); nameDiv.className = 'rank-name'; nameDiv.textContent = entry.name;
     if (entry.name === playerName) { nameDiv.style.color = '#4ecca3'; nameDiv.textContent += ' (você)'; }
+    else {
+      // Verificar se é jogador online
+      const isOnline = Object.values(otherPlayers).some(p => p.name === entry.name);
+      if (isOnline) nameDiv.style.color = '#9b59b6';
+    }
     const killsDiv = document.createElement('div'); killsDiv.className = 'rank-kills'; killsDiv.textContent = `${entry.kills} kills`;
     div.appendChild(posDiv); div.appendChild(nameDiv); div.appendChild(killsDiv);
     list.appendChild(div);
@@ -934,11 +1035,46 @@ function drawGoblinKing(ctx, x, y, facingRight = true, scale = 1.3) {
   ctx.restore();
 }
 
+// Desenha o jogador LOCAL (azul)
 function drawPlayer(ctx, x, y) {
   ctx.fillStyle = '#3498db'; ctx.fillRect(x + 8, y + 6, 16, 12);
   ctx.fillRect(x + 10, y + 18, 12, 12); ctx.fillRect(x + 6, y + 20, 4, 8); ctx.fillRect(x + 22, y + 20, 4, 8);
   ctx.fillStyle = '#bdc3c7'; ctx.fillRect(x + 24, y + 14, 4, 14);
   ctx.fillStyle = '#8b4513'; ctx.fillRect(x + 22, y + 26, 8, 3);
+}
+
+// Desenha OUTROS jogadores (roxo)
+function drawOtherPlayer(ctx, x, y) {
+  ctx.fillStyle = '#9b59b6'; ctx.fillRect(x + 8, y + 6, 16, 12);
+  ctx.fillRect(x + 10, y + 18, 12, 12); ctx.fillRect(x + 6, y + 20, 4, 8); ctx.fillRect(x + 22, y + 20, 4, 8);
+  ctx.fillStyle = '#bdc3c7'; ctx.fillRect(x + 24, y + 14, 4, 14);
+  ctx.fillStyle = '#8b4513'; ctx.fillRect(x + 22, y + 26, 8, 3);
+}
+
+// Desenha jogador abatido (deitado)
+function drawDownedPlayer(ctx, x, y, isOther = false) {
+  ctx.save();
+  ctx.translate(x + TILE/2, y + TILE/2);
+  ctx.rotate(Math.PI / 2); // Deitar o jogador
+  
+  const color = isOther ? '#9b59b6' : '#3498db';
+  ctx.fillStyle = color;
+  ctx.fillRect(-8, -16, 16, 12);
+  ctx.fillRect(-6, -4, 12, 12);
+  ctx.fillRect(-10, -2, 4, 8);
+  ctx.fillRect(6, -2, 4, 8);
+  
+  // X nos olhos (morto)
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-5, -12); ctx.lineTo(-2, -9);
+  ctx.moveTo(-2, -12); ctx.lineTo(-5, -9);
+  ctx.moveTo(2, -12); ctx.lineTo(5, -9);
+  ctx.moveTo(5, -12); ctx.lineTo(2, -9);
+  ctx.stroke();
+  
+  ctx.restore();
 }
 
 function addFloatingText(x, y, text, color) { floatingTexts.push({ x, y, text, color, life: 1.5, vy: -40 }); }
@@ -954,12 +1090,25 @@ function gameLoop(time = 0) {
   if (state !== 'game') return;
   const dt = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
-  if (!inventoryOpen && !rankingOpen) update(dt);
+  
+  // NÃO PAUSA MAIS - o jogo continua mesmo com inventário/ranking abertos
+  update(dt);
   render();
   requestAnimationFrame(gameLoop);
 }
 
 function update(dt) {
+  // Jogador abatido não pode se mover
+  if (player.downed) {
+    // Só atualiza câmera e HUD
+    camera.x = player.x * TILE - gameCanvas.width / 2;
+    camera.y = player.y * TILE - gameCanvas.height / 2;
+    camera.x = Math.max(0, Math.min(MAP_W * TILE - gameCanvas.width, camera.x));
+    camera.y = Math.max(0, Math.min(MAP_H * TILE - gameCanvas.height, camera.y));
+    updateHUD();
+    return;
+  }
+  
   let dx = 0, dy = 0;
   const speed = 4 * dt;
   if (keys['w'] || keys['arrowup']) dy -= speed;
@@ -979,6 +1128,49 @@ function update(dt) {
 
   const now = Date.now();
   if (player.hp < player.maxHp && now - player.lastHit > 10000) player.hp = Math.min(player.maxHp, player.hp + 10 * dt);
+
+  // ============ LÓGICA DE REVIVER ============
+  if (keys[' '] && !player.downed) {
+    const nearbyDownedPlayer = findNearbyDownedPlayer();
+    if (nearbyDownedPlayer) {
+      if (!isReviving || reviveTarget !== nearbyDownedPlayer.id) {
+        isReviving = true;
+        reviveTarget = nearbyDownedPlayer.id;
+        reviveStartTime = Date.now();
+        addFloatingText(player.x, player.y - 1, '💚 Revivendo...', '#4ecca3');
+      }
+      
+      const elapsed = Date.now() - reviveStartTime;
+      const progress = Math.min(elapsed / REVIVE_TIME, 1);
+      
+      socket.emit('reviveProgress', {
+        targetId: nearbyDownedPlayer.id,
+        progress: progress
+      });
+      
+      if (progress >= 1) {
+        socket.emit('playerRevived');
+        nearbyDownedPlayer.downed = false;
+        nearbyDownedPlayer.hp = 50;
+        nearbyDownedPlayer.reviveProgress = 0;
+        nearbyDownedPlayer.beingRevivedBy = null;
+        isReviving = false;
+        reviveTarget = null;
+        addFloatingText(nearbyDownedPlayer.x, nearbyDownedPlayer.y - 1, '✨ REVIVIDO!', '#4ecca3');
+        spawnParticles(nearbyDownedPlayer.x, nearbyDownedPlayer.y, '#4ecca3', 20);
+      }
+    } else {
+      if (isReviving) {
+        isReviving = false;
+        reviveTarget = null;
+      }
+    }
+  } else {
+    if (isReviving) {
+      isReviving = false;
+      reviveTarget = null;
+    }
+  }
 
   // LOOP DE INIMIGOS NORMAIS (pula o Rei)
   enemies.forEach(e => {
@@ -1061,20 +1253,18 @@ function update(dt) {
     if (e.isMoving) e.bouncePhase += dt * 8;
     else { e.bouncePhase *= 0.9; if (Math.abs(e.bouncePhase) < 0.01) e.bouncePhase = 0; }
 
-// Habilidade do Arcanjo - círculo dourado de aviso
-if (e.isArcanjo && now - e.lastBeam > 10000 && distToPlayer < 10) {
-  e.lastBeam = now;
-  // Cria aviso (círculo dourado) que dura 2 segundos
-  lightBeams.push({
-    x: player.x,
-    y: player.y,
-    phase: 'warning', // fase de aviso
-    life: 2.0, // 2 segundos de aviso
-    damage: 200,
-    triggered: false
-  });
-  addFloatingText(player.x, player.y - 1, '⚠️ LUZ!', '#FFD700');
-}
+    if (e.isArcanjo && now - e.lastBeam > 10000 && distToPlayer < 10) {
+      e.lastBeam = now;
+      lightBeams.push({
+        x: player.x,
+        y: player.y,
+        phase: 'warning',
+        life: 2.0,
+        damage: 200,
+        triggered: false
+      });
+      addFloatingText(player.x, player.y - 1, '⚠️ LUZ!', '#FFD700');
+    }
 
     if (distToPlayer < 1.2 && now - e.lastAttack > 1000 && e.stunTimer <= 0) {
       const isCrit = Math.random() < 0.05;
@@ -1097,16 +1287,21 @@ if (e.isArcanjo && now - e.lastBeam > 10000 && distToPlayer < 10) {
 
       e.lastAttack = now;
 
-      if (player.hp <= 0) {
+      // ============ MORTE -> ESTADO ABATIDO ============
+      if (player.hp <= 0 && !player.downed) {
         player.hp = 0;
-        removeFromRanking();
-        alert('💀 Você morreu! Total de kills: ' + player.kills);
-        location.reload();
+        player.downed = true;
+        player.downedTime = Date.now();
+        document.getElementById('downedOverlay').style.display = 'flex';
+        addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+        spawnParticles(player.x, player.y, '#e94560', 30);
+        screenShake.intensity = 15;
+        socket.emit('playerDowned', { x: player.x, y: player.y });
       }
     }
   });
 
-  // LOOP DO GOBLIN REI (separado)
+  // LOOP DO GOBLIN REI (mantido igual)
   enemies.forEach(king => {
     if (!king.isKing) return;
     
@@ -1158,11 +1353,14 @@ if (e.isArcanjo && now - e.lastBeam > 10000 && distToPlayer < 10) {
             player.hp -= dmg;
             player.lastHit = Date.now();
             addFloatingText(player.x, player.y - 0.5, `-${Math.round(dmg)} PULO!`, '#ff4444');
-            if (player.hp <= 0) {
+            if (player.hp <= 0 && !player.downed) {
               player.hp = 0;
-              removeFromRanking();
-              alert('💀 Você morreu! Total de kills: ' + player.kills);
-              location.reload();
+              player.downed = true;
+              player.downedTime = Date.now();
+              document.getElementById('downedOverlay').style.display = 'flex';
+              addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+              spawnParticles(player.x, player.y, '#e94560', 30);
+              socket.emit('playerDowned', { x: player.x, y: player.y });
             }
           }
         }
@@ -1245,11 +1443,14 @@ if (e.isArcanjo && now - e.lastBeam > 10000 && distToPlayer < 10) {
             player.lastHit = Date.now();
             addFloatingText(player.x, player.y - 0.5, `-${Math.round(dmg)}`, '#ff4444');
             screenShake.intensity = 8;
-            if (player.hp <= 0) {
+            if (player.hp <= 0 && !player.downed) {
               player.hp = 0;
-              removeFromRanking();
-              alert('💀 Você morreu! Total de kills: ' + player.kills);
-              location.reload();
+              player.downed = true;
+              player.downedTime = Date.now();
+              document.getElementById('downedOverlay').style.display = 'flex';
+              addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+              spawnParticles(player.x, player.y, '#e94560', 30);
+              socket.emit('playerDowned', { x: player.x, y: player.y });
             }
           }
           king.lastAttack = Date.now();
@@ -1260,46 +1461,46 @@ if (e.isArcanjo && now - e.lastBeam > 10000 && distToPlayer < 10) {
     }
   });
 
-// Atualiza feixes de luz do Arcanjo
-lightBeams.forEach(lb => {
-  lb.life -= dt;
-  
-  if (lb.phase === 'warning') {
-    // Fase de aviso - círculo dourado no chão
-    if (lb.life <= 0) {
-      // Aviso acabou, agora cai o feixe
-      lb.phase = 'active';
-      lb.life = 0.5; // feixe dura 0.5 segundos
-    }
-  } else if (lb.phase === 'active') {
-    // Feixe caiu - causa dano
-    if (!lb.triggered) {
-      lb.triggered = true;
-      const distToPlayer = Math.hypot(player.x - lb.x, player.y - lb.y);
-      if (distToPlayer < 1.0) {
-        let dmg = lb.damage * (1 - player.resistance);
-        const shield = player.equipment.shield;
-        if (shield && shield.blockChance && Math.random() < shield.blockChance) {
-          addFloatingText(player.x, player.y - 0.8, '🛡️ BLOCK!', '#3498db');
-          spawnParticles(player.x, player.y, '#3498db', 12);
-        } else {
-          player.hp -= dmg;
-          player.lastHit = Date.now();
-          addFloatingText(player.x, player.y - 0.5, `-${Math.round(dmg)} LUZ!`, '#fff');
-          screenShake.intensity = 12;
-          spawnParticles(player.x, player.y, '#FFD700', 25);
-          if (player.hp <= 0) {
-            player.hp = 0;
-            removeFromRanking();
-            alert('💀 Você morreu! Total de kills: ' + player.kills);
-            location.reload();
+  // Feixes de luz do Arcanjo
+  lightBeams.forEach(lb => {
+    lb.life -= dt;
+    
+    if (lb.phase === 'warning') {
+      if (lb.life <= 0) {
+        lb.phase = 'active';
+        lb.life = 0.5;
+      }
+    } else if (lb.phase === 'active') {
+      if (!lb.triggered) {
+        lb.triggered = true;
+        const distToPlayer = Math.hypot(player.x - lb.x, player.y - lb.y);
+        if (distToPlayer < 1.0) {
+          let dmg = lb.damage * (1 - player.resistance);
+          const shield = player.equipment.shield;
+          if (shield && shield.blockChance && Math.random() < shield.blockChance) {
+            addFloatingText(player.x, player.y - 0.8, '🛡️ BLOCK!', '#3498db');
+            spawnParticles(player.x, player.y, '#3498db', 12);
+          } else {
+            player.hp -= dmg;
+            player.lastHit = Date.now();
+            addFloatingText(player.x, player.y - 0.5, `-${Math.round(dmg)} LUZ!`, '#fff');
+            screenShake.intensity = 12;
+            spawnParticles(player.x, player.y, '#FFD700', 25);
+            if (player.hp <= 0 && !player.downed) {
+              player.hp = 0;
+              player.downed = true;
+              player.downedTime = Date.now();
+              document.getElementById('downedOverlay').style.display = 'flex';
+              addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+              spawnParticles(player.x, player.y, '#e94560', 30);
+              socket.emit('playerDowned', { x: player.x, y: player.y });
+            }
           }
         }
       }
     }
-  }
-});
-lightBeams = lightBeams.filter(lb => lb.life > 0);
+  });
+  lightBeams = lightBeams.filter(lb => lb.life > 0);
 
   // Hordas
   hordeInstances.forEach(horde => {
@@ -1369,11 +1570,14 @@ lightBeams = lightBeams.filter(lb => lb.life > 0);
         player.lastHit = Date.now();
         addFloatingText(player.x, player.y - 0.5, `-${Math.round(dmg)} 🎯`, '#ff8800');
         screenShake.intensity = 6;
-        if (player.hp <= 0) {
+        if (player.hp <= 0 && !player.downed) {
           player.hp = 0;
-          removeFromRanking();
-          alert('💀 Você morreu! Total de kills: ' + player.kills);
-          location.reload();
+          player.downed = true;
+          player.downedTime = Date.now();
+          document.getElementById('downedOverlay').style.display = 'flex';
+          addFloatingText(player.x, player.y - 1, '💀 ABATIDO!', '#e94560');
+          spawnParticles(player.x, player.y, '#e94560', 30);
+          socket.emit('playerDowned', { x: player.x, y: player.y });
         }
       }
       spawnParticles(tg.x, tg.y, '#4a7c3f', 10);
@@ -1434,6 +1638,35 @@ lightBeams = lightBeams.filter(lb => lb.life > 0);
   camera.y = Math.max(0, Math.min(MAP_H * TILE - gameCanvas.height, camera.y));
   mouse.worldX = (mouse.x + camera.x) / TILE; mouse.worldY = (mouse.y + camera.y) / TILE;
   updateHUD();
+  
+  // ============ ENVIAR ATUALIZAÇÃO AO SERVIDOR ============
+  const nowUpdate = Date.now();
+  if (nowUpdate - lastPlayerUpdate > 50 && socket) {
+    lastPlayerUpdate = nowUpdate;
+    socket.emit('playerUpdate', {
+      id: myPlayerId,
+      name: playerName,
+      x: player.x,
+      y: player.y,
+      hp: player.hp,
+      maxHp: player.maxHp,
+      level: player.level,
+      kills: player.kills,
+      attackAngle: player.attackAngle,
+      attacking: player.attacking,
+      downed: player.downed
+    });
+  }
+}
+
+function findNearbyDownedPlayer() {
+  for (const id in otherPlayers) {
+    const p = otherPlayers[id];
+    if (p.downed && Math.hypot(player.x - p.x, player.y - p.y) < 2) {
+      return p;
+    }
+  }
+  return null;
 }
 
 function startKingJump(king) {
@@ -1522,6 +1755,7 @@ function isBlocked(x, y) {
 }
 
 function doAttack() {
+  if (player.downed) return; // Não pode atacar se abatido
   if (!player.equipment.weapon) { addFloatingText(player.x + 0.5, player.y - 0.8, 'Sem arma!', '#ff4444'); player.attackCooldown = 0.3; return; }
   const isCrit = Math.random() < 0.05;
   const dmg = isCrit ? player.damage * 2 : player.damage;
@@ -1586,6 +1820,7 @@ function doAttack() {
 }
 
 function pickupNearbyItem() {
+  if (player.downed) return;
   let picked = false;
   for (let i = groundItems.length - 1; i >= 0; i--) {
     const item = groundItems[i];
@@ -1628,63 +1863,56 @@ function render() {
   gameCtx.fillStyle = 'rgba(52, 152, 219, 0.15)';
   gameCtx.fillRect(spx, spy, TILE, TILE);
 
-// Feixes de luz do Arcanjo
-lightBeams.forEach(lb => {
-  const lx = lb.x * TILE;
-  const ly = lb.y * TILE;
-  
-  if (lb.phase === 'warning') {
-    // Círculo dourado de aviso (igual ao do Rei)
-    const pulseSize = 1 + Math.sin(Date.now() / 100) * 0.1;
-    const radius = 1.2 * TILE * pulseSize;
-    const alpha = Math.min(0.6, lb.life * 0.4);
+  // Feixes de luz do Arcanjo
+  lightBeams.forEach(lb => {
+    const lx = lb.x * TILE;
+    const ly = lb.y * TILE;
     
-    // Círculo externo
-    gameCtx.globalAlpha = alpha * 0.3;
-    gameCtx.fillStyle = '#FFD700';
-    gameCtx.beginPath();
-    gameCtx.arc(lx, ly, radius * 1.1, 0, Math.PI * 2);
-    gameCtx.fill();
-    
-    // Círculo interno
-    gameCtx.globalAlpha = alpha * 0.6;
-    gameCtx.fillStyle = '#FFA500';
-    gameCtx.beginPath();
-    gameCtx.arc(lx, ly, radius, 0, Math.PI * 2);
-    gameCtx.fill();
-    
-    // Borda dourada
-    gameCtx.globalAlpha = alpha;
-    gameCtx.strokeStyle = '#FFD700';
-    gameCtx.lineWidth = 3;
-    gameCtx.beginPath();
-    gameCtx.arc(lx, ly, radius, 0, Math.PI * 2);
-    gameCtx.stroke();
-    
-    gameCtx.globalAlpha = 1;
-  } else if (lb.phase === 'active') {
-    // Feixe de luz caindo
-    const alpha = Math.min(1, lb.life * 2);
-    
-    // Quadrado branco brilhante
-    gameCtx.globalAlpha = alpha * 0.7;
-    gameCtx.fillStyle = '#fff';
-    gameCtx.fillRect(lx - 20, ly - 20, 40, 40);
-    
-    // Feixe de luz dourado
-    gameCtx.globalAlpha = alpha;
-    const gradient = gameCtx.createRadialGradient(lx, ly, 0, lx, ly, 35);
-    gradient.addColorStop(0, 'rgba(255, 215, 0, 1)');
-    gradient.addColorStop(0.5, 'rgba(255, 255, 200, 0.7)');
-    gradient.addColorStop(1, 'rgba(255, 215, 0, 0)');
-    gameCtx.fillStyle = gradient;
-    gameCtx.beginPath();
-    gameCtx.arc(lx, ly, 35, 0, Math.PI * 2);
-    gameCtx.fill();
-    
-    gameCtx.globalAlpha = 1;
-  }
-});
+    if (lb.phase === 'warning') {
+      const pulseSize = 1 + Math.sin(Date.now() / 100) * 0.1;
+      const radius = 1.2 * TILE * pulseSize;
+      const alpha = Math.min(0.6, lb.life * 0.4);
+      
+      gameCtx.globalAlpha = alpha * 0.3;
+      gameCtx.fillStyle = '#FFD700';
+      gameCtx.beginPath();
+      gameCtx.arc(lx, ly, radius * 1.1, 0, Math.PI * 2);
+      gameCtx.fill();
+      
+      gameCtx.globalAlpha = alpha * 0.6;
+      gameCtx.fillStyle = '#FFA500';
+      gameCtx.beginPath();
+      gameCtx.arc(lx, ly, radius, 0, Math.PI * 2);
+      gameCtx.fill();
+      
+      gameCtx.globalAlpha = alpha;
+      gameCtx.strokeStyle = '#FFD700';
+      gameCtx.lineWidth = 3;
+      gameCtx.beginPath();
+      gameCtx.arc(lx, ly, radius, 0, Math.PI * 2);
+      gameCtx.stroke();
+      
+      gameCtx.globalAlpha = 1;
+    } else if (lb.phase === 'active') {
+      const alpha = Math.min(1, lb.life * 2);
+      
+      gameCtx.globalAlpha = alpha * 0.7;
+      gameCtx.fillStyle = '#fff';
+      gameCtx.fillRect(lx - 20, ly - 20, 40, 40);
+      
+      gameCtx.globalAlpha = alpha;
+      const gradient = gameCtx.createRadialGradient(lx, ly, 0, lx, ly, 35);
+      gradient.addColorStop(0, 'rgba(255, 215, 0, 1)');
+      gradient.addColorStop(0.5, 'rgba(255, 255, 200, 0.7)');
+      gradient.addColorStop(1, 'rgba(255, 215, 0, 0)');
+      gameCtx.fillStyle = gradient;
+      gameCtx.beginPath();
+      gameCtx.arc(lx, ly, 35, 0, Math.PI * 2);
+      gameCtx.fill();
+      
+      gameCtx.globalAlpha = 1;
+    }
+  });
 
   groundItems.forEach(item => {
     const px = item.x * TILE; const py = item.y * TILE;
@@ -1811,7 +2039,6 @@ lightBeams.forEach(lb => {
       gameCtx.globalAlpha = 1;
     }
     
-    // Efeito de brilho/faíscas no Arcanjo
     if (e.isArcanjo) {
       if (Math.random() < 0.3) {
         const sparkX = px + Math.random() * TILE;
@@ -1824,8 +2051,77 @@ lightBeams.forEach(lb => {
     }
   });
 
-  const ppx = (player.x - 0.5) * TILE; const ppy = (player.y - 0.5) * TILE;
-  drawPlayer(gameCtx, ppx, ppy);
+  // ============ DESENHAR OUTROS JOGADORES (ANTES DO LOCAL) ============
+  Object.values(otherPlayers).forEach(p => {
+    const px = (p.x - 0.5) * TILE;
+    const py = (p.y - 0.5) * TILE;
+    
+    if (p.downed) {
+      drawDownedPlayer(gameCtx, px, py, true);
+    } else {
+      drawOtherPlayer(gameCtx, px, py);
+    }
+    
+    // Barra de vida
+    drawHealthBar(gameCtx, px + 2, py - 8, 28, p.hp, p.maxHp);
+    
+    // Nome e level
+    gameCtx.fillStyle = '#fff';
+    gameCtx.font = 'bold 12px Arial';
+    gameCtx.textAlign = 'center';
+    gameCtx.strokeStyle = '#000';
+    gameCtx.lineWidth = 3;
+    gameCtx.strokeText(p.name, px + 16, py - 15);
+    gameCtx.fillText(p.name, px + 16, py - 15);
+    
+    gameCtx.fillStyle = '#4ecca3';
+    gameCtx.font = 'bold 10px Arial';
+    gameCtx.strokeText(`Lv${p.level}`, px + 16, py - 25);
+    gameCtx.fillText(`Lv${p.level}`, px + 16, py - 25);
+    
+    // Se abatido, mostrar texto
+    if (p.downed) {
+      gameCtx.fillStyle = '#e94560';
+      gameCtx.font = 'bold 12px Arial';
+      gameCtx.strokeText('💀 ABATIDO', px + 16, py - 35);
+      gameCtx.fillText('💀 ABATIDO', px + 16, py - 35);
+    }
+    
+    // Barra de progresso de reviver
+    if (p.reviveProgress > 0 && p.reviveProgress < 1) {
+      const barWidth = 40;
+      const barHeight = 6;
+      const barX = px + 16 - barWidth / 2;
+      const barY = py - 45;
+      
+      gameCtx.fillStyle = '#333';
+      gameCtx.fillRect(barX, barY, barWidth, barHeight);
+      gameCtx.fillStyle = '#4ecca3';
+      gameCtx.fillRect(barX, barY, barWidth * p.reviveProgress, barHeight);
+      gameCtx.strokeStyle = '#000';
+      gameCtx.lineWidth = 1;
+      gameCtx.strokeRect(barX, barY, barWidth, barHeight);
+      
+      gameCtx.fillStyle = '#fff';
+      gameCtx.font = 'bold 10px Arial';
+      gameCtx.textAlign = 'center';
+      gameCtx.strokeStyle = '#000';
+      gameCtx.lineWidth = 2;
+      gameCtx.strokeText('Revivendo...', px + 16, barY - 3);
+      gameCtx.fillText('Revivendo...', px + 16, barY - 3);
+    }
+  });
+
+  // ============ DESENHAR JOGADOR LOCAL ============
+  const ppx = (player.x - 0.5) * TILE; 
+  const ppy = (player.y - 0.5) * TILE;
+  
+  if (player.downed) {
+    drawDownedPlayer(gameCtx, ppx, ppy, false);
+  } else {
+    drawPlayer(gameCtx, ppx, ppy);
+  }
+  
   drawHealthBar(gameCtx, ppx + 2, ppy - 8, 28, player.hp, player.maxHp);
 
   if (player.attackAnimTime > 0 && player.equipment.weapon) {
@@ -1848,10 +2144,28 @@ lightBeams.forEach(lb => {
 
   let nearbyItem = null;
   for (const item of groundItems) { if (Math.hypot(player.x - item.x, player.y - item.y) < 1.5) { nearbyItem = item; break; } }
-  if (nearbyItem) {
+  if (nearbyItem && !player.downed) {
     const ix = nearbyItem.x * TILE; const iy = nearbyItem.y * TILE;
     gameCtx.fillStyle = '#fff'; gameCtx.font = 'bold 14px Arial'; gameCtx.textAlign = 'center'; gameCtx.strokeStyle = '#000'; gameCtx.lineWidth = 3;
     gameCtx.strokeText(`[F] ${nearbyItem.item.name}`, ix, iy - 30); gameCtx.fillText(`[F] ${nearbyItem.item.name}`, ix, iy - 30);
+  }
+
+  // Indicação de jogador abatido próximo (para reviver)
+  if (!player.downed) {
+    const downedNearby = findNearbyDownedPlayer();
+    if (downedNearby) {
+      const ix = downedNearby.x * TILE;
+      const iy = downedNearby.y * TILE;
+      gameCtx.fillStyle = '#4ecca3';
+      gameCtx.font = 'bold 14px Arial';
+      gameCtx.textAlign = 'center';
+      gameCtx.strokeStyle = '#000';
+      gameCtx.lineWidth = 3;
+      const progress = isReviving && reviveTarget === downedNearby.id ? Math.floor(((Date.now() - reviveStartTime) / REVIVE_TIME) * 100) : 0;
+      const text = isReviving && reviveTarget === downedNearby.id ? `[ESPAÇO] Revivendo ${progress}%` : '[ESPAÇO] Reviver aliado';
+      gameCtx.strokeText(text, ix, iy - 50);
+      gameCtx.fillText(text, ix, iy - 50);
+    }
   }
 
   hordeInstances.forEach(horde => {
@@ -1918,7 +2232,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 document.addEventListener('mousemove', e => { if (state === 'game') { const rect = gameCanvas.getBoundingClientRect(); mouse.x = e.clientX - rect.left; mouse.y = e.clientY - rect.top; } });
-document.addEventListener('mousedown', e => { if (state === 'game' && !inventoryOpen && !rankingOpen && e.button === 0) { if (player.attackCooldown <= 0) doAttack(); } });
+document.addEventListener('mousedown', e => { if (state === 'game' && !inventoryOpen && !rankingOpen && e.button === 0) { if (player.attackCooldown <= 0 && !player.downed) doAttack(); } });
 window.addEventListener('resize', () => { if (state === 'game') { gameCanvas.width = window.innerWidth; gameCanvas.height = window.innerHeight; } });
 </script>
 </body>
